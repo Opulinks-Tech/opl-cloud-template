@@ -31,6 +31,21 @@ IoT device
 #define IOT_DEVICE_DATA_TASK_PRIORITY_TX    (osPriorityNormal)
 #define IOT_DEVICE_DATA_TASK_PRIORITY_RX    (osPriorityNormal)
 
+/*
+Cloud type enum
+*/
+#define IOT_CLOUD_TYPE_NONE         0
+#define IOT_CLOUD_TYPE_TENCENTYUN   1
+
+/*
+Cloud type selection
+*/
+#define IOT_CLOUD_TYPE_SELECTION    IOT_CLOUD_TYPE_NONE
+
+/*
+Iot TX wait rsp timeout
+*/
+#define IOT_TX_WAIT_TIMEOUT_TIME            (20000) //ms
 
 #endif /* __IOT_CONFIGURATION_H__ */
 

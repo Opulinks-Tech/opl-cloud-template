@@ -21,8 +21,7 @@
 #include "wifi_types.h"
 #include "blewifi_common.h"
 #include "blewifi_configuration.h"
-#include "ble_msg.h"
-
+#include "app_configuration.h"
 
 typedef enum {
     BW_WIFI_FSM_STATE_INIT             = 0x0,
@@ -40,7 +39,7 @@ typedef enum bw_wifi_fsm_msg_type
     BW_WIFI_FSM_MSG_WIFI_REQ_CONNECT                = 0x3,      //Wi-Fi connect
     //don't used                                    = 0x4,
     BW_WIFI_FSM_MSG_WIFI_REQ_DISCONNECT             = 0x5,      //Wi-Fi disconnnect
-    BW_WIFI_FSM_MSG_WIFI_REQ_END                    = 0x6,      //Req event end
+    BW_WIFI_FSM_MSG_WIFI_STOP                       = 0x6,      //Wi-Fi stop
 
     BW_WIFI_FSM_MSG_WIFI_REQ_AUTO_CONNECT_START     = 0x15,     //Wi-Fi Auto connect scan
     BW_WIFI_FSM_MSG_WIFI_REQ_AUTO_CONNECT_SCAN      = 0x16,     //Wi-Fi Auto connect scan
@@ -49,6 +48,8 @@ typedef enum bw_wifi_fsm_msg_type
     BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_SCAN           = 0x20,     //Wi-Fi Roaming scan
     BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_CONNECT        = 0x21,     //Wi-Fi Roaming connect
 
+    BW_WIFI_FSM_MSG_WIFI_REQ_END                    = 0x22,      //Req event end
+
     /* Wi-Fi Trigger */
     BW_WIFI_FSM_MSG_WIFI_IND_START                  = 0x40,     //Ind start
     BW_WIFI_FSM_MSG_WIFI_INIT_COMPLETE              = 0x41,     //Wi-Fi report status
@@ -56,7 +57,8 @@ typedef enum bw_wifi_fsm_msg_type
     BW_WIFI_FSM_MSG_WIFI_CONNECTION_SUCCESS_IND     = 0x43,     //Wi-Fi report status
     BW_WIFI_FSM_MSG_WIFI_CONNECTION_FAIL_IND        = 0x44,     //Wi-Fi report status
     BW_WIFI_FSM_MSG_WIFI_DISCONNECTION_IND          = 0x45,     //Wi-Fi report status
-    BW_WIFI_FSM_MSG_WIFI_IND_END                    = 0x46,     //Ind start
+    //don't used
+    BW_WIFI_FSM_MSG_WIFI_IND_END                    = 0x47,     //Ind end
 
     BW_WIFI_FSM_MSG_WIFI_GOT_IP_IND                 = 0x60,     //Wi-Fi report status
 
@@ -95,7 +97,9 @@ typedef enum bw_wifi_fsm_disconnect_reason
 #define BW_WIFI_FSM_EVENT_BIT_EXEC_AUTO_CONN                     0x00000001U
 #define BW_WIFI_FSM_EVENT_BIT_EXEC_RESET                         0x00000002U
 #define BW_WIFI_FSM_EVENT_BIT_DHCP_TIMEOUT                       0x00000004U
+#define BW_WIFI_FSM_EVENT_BIT_WIFI_USED                          0x00000008U
 
+extern uint32_t g_u32AppCtrlAutoConnectIntervalSelect;
 
 typedef int32_t (*T_Bw_Wifi_FsmEvtHandler_Fp)(uint32_t u32EventId, uint8_t *pu8Data, uint32_t u32DataLen);
 typedef void (*T_BleWifi_Wifi_App_Ctrl_CB_Fp)(void);
@@ -122,9 +126,10 @@ typedef struct {
 
 } wifi_status_t;
 
-
+int32_t BwWifiFlushCMD(osMessageQId tBwWifiCmdQueueId);
 int32_t BleWifi_Wifi_FSM(uint32_t u32EventId, uint8_t *pu8Data, uint32_t u32DataLen);
 int32_t BleWifi_Wifi_FSM_MsgSend(uint32_t u32MsgType, uint8_t *pu8Data, uint32_t u32DataLen, T_BleWifi_Wifi_App_Ctrl_CB_Fp fpCB, uint32_t u32IsFront);
+int32_t BleWifi_Wifi_FSM_CmdPush_Without_Check(uint32_t u32EventId, uint8_t *pu8Data, uint32_t u32DataLen, T_BleWifi_Wifi_App_Ctrl_CB_Fp fpCB, uint32_t u32IsFront);
 int32_t BleWifi_Wifi_FSM_CmdPush(uint32_t u32EventId, uint8_t *pu8Data, uint32_t u32DataLen, T_BleWifi_Wifi_App_Ctrl_CB_Fp fpCB, uint32_t u32IsFront);
 void BleWifi_Wifi_FSM_Init(void);
 

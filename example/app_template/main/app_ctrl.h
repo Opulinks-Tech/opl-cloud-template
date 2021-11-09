@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "blewifi_configuration.h"
+#include "app_configuration.h"
 
 #define APP_CTRL_TASK_PRIORITY      (osPriorityNormal)
 #define APP_CTRL_QUEUE_SIZE         (20)
@@ -45,6 +46,7 @@ typedef enum blewifi_app_ctrl_msg_type
     APP_CTRL_MSG_WIFI_SCAN_DONE,                //Wi-Fi report status
     APP_CTRL_MSG_WIFI_CONNECTION,               //Wi-Fi report status
     APP_CTRL_MSG_WIFI_DISCONNECTION,            //Wi-Fi report status
+    APP_CTRL_MSG_WIFI_STOP_COMPLETE,            //Wi-Fi report status
 
     APP_CTRL_MSG_WIFI_NUM,
 
@@ -69,6 +71,9 @@ typedef enum blewifi_app_ctrl_msg_type
     APP_CTRL_MSG_PS_SMART_DEBOUNCE_TIMEOUT,     //PS SMART Debounce Time Out
 #endif
 
+    APP_CTRL_MSG_CLOUD_CONNECTION,
+    APP_CTRL_MSG_CLOUD_DISCONNECTION,
+
     APP_CTRL_MSG_MAX_NUM
 } app_ctrl_msg_type_e;
 
@@ -83,7 +88,6 @@ typedef enum app_ctrl_sys_state
 {
     APP_CTRL_SYS_INIT = 0x00,       // PS(0), Wifi(1), Ble(1)
     APP_CTRL_SYS_NORMAL,            // PS(1), Wifi(1), Ble(1)
-    APP_CTRL_SYS_BLE_OFF,           // PS(1), Wifi(1), Ble(0)
 
     APP_CTRL_SYS_NUM
 } app_ctrl_sys_state_e;
@@ -110,6 +114,29 @@ typedef enum {
 #define APP_CTRL_EVENT_BIT_NETWORK               0x00000100U
 #define APP_CTRL_EVENT_BIT_OTA                   0x00000200U
 #define APP_CTRL_EVENT_BIT_IOT_INIT              0x00000400U
+#define APP_CTRL_EVENT_BIT_CLOUD_COONNECTED      0x00000800U
+
+// ble status
+typedef enum
+{
+    APP_CTRL_BLE_STATUS_IDLE        = 0,
+    APP_CTRL_BLE_STATUS_ADV         = 1,
+    APP_CTRL_BLE_STATUS_CONNECTED   = 2
+} app_ctrl_ble_status;
+
+// wifi status
+typedef enum
+{
+    APP_CTRL_WIFI_STATUS_IDLE       = 0,
+    APP_CTRL_WIFI_STATUS_CONNECTED  = 1
+} app_ctrl_wifi_status;
+
+// cloud status
+typedef enum
+{
+    APP_CTRL_CLOUD_STATUS_IDLE      = 0,
+    APP_CTRL_CLOUD_STATUS_CONNECTED = 1
+} app_ctrl_cloud_status;
 
 typedef void (*App_Ctrl_EvtHandler_Fp_t)(uint32_t u32EvtType, void *pData, uint32_t u32Len);
 typedef struct
@@ -118,18 +145,23 @@ typedef struct
     App_Ctrl_EvtHandler_Fp_t fpFunc;
 } App_Ctrl_EvtHandlerTbl_t;
 
+typedef struct
+{
+    uint32_t u32ExpireTime;
+    uint32_t u32AdvInterval;
+} App_Ctrl_Networking_config_t;
 
 void App_Ctrl_SysModeSet(uint8_t mode);
 uint8_t App_Ctrl_SysModeGet(void);
 
-void App_Ctrl_NetworkingStart(uint32_t u32ExpireTime);
+void App_Ctrl_NetworkingStart(uint32_t u32ExpireTime , uint32_t u32AdvInterval);
 void App_Ctrl_NetworkingStop(void);
 #if (APP_CTRL_BUTTON_SENSOR_EN == 1)
 void App_Ctrl_ButtonReleaseHandle(uint8_t u8ReleaseCount);
 #endif
 
 #ifdef __BLEWIFI_TRANSPARENT__
-int App_Ctrl_BleCastWithExpire(uint8_t u8BleCastEnable, uint32_t u32ExpireTime);
+int App_Ctrl_BleCastWithExpire(uint8_t u8BleCastEnable, uint32_t u32ExpireTime, uint32_t u32AdvInterval);
 int App_Ctrl_BleCastParamSet(uint32_t u32CastInteval);
 #endif
 

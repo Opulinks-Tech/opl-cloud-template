@@ -41,12 +41,7 @@ Head Block of The File
 #include "hal_system.h"
 #include "hal_pin.h"
 #include "hal_pin_def.h"
-#ifdef __BLEWIFI_TRANSPARENT__
-#include "at_cmd_app_patch.h"
-#include "hal_pin_config_project_transparent.h"
-#else
 #include "hal_pin_config_project.h"
-#endif
 #include "at_cmd_common_patch.h"
 #include "mw_fim.h"
 #include "mw_fim_default.h"
@@ -54,11 +49,14 @@ Head Block of The File
 #include "hal_vic.h"
 #include "boot_sequence.h"
 #include "hal_wdt.h"
+#include "ps_patch.h"
 
 #include "app_main.h"
 #include "blewifi_configuration.h"
+#include "app_configuration.h"
 #include "mw_fim_default_version_project.h"
 #include "mw_fim_default_group11_project.h"
+#include "sys_cfg.h"
 
 
 // Sec 2: Constant Definitions, Imported Symbols, miscellaneous
@@ -96,9 +94,6 @@ static void Main_FlashLayoutUpdate(void);
 static void Main_MiscDriverConfigSetup(void);
 static void Main_AtUartDbgUartSwitch(void);
 static void Main_AppInit_patch(void);
-#ifdef __BLEWIFI_TRANSPARENT__
-static int Main_BleWifiInit(void);
-#endif
 static void Main_ApsUartRxDectecConfig(void);
 #ifdef __APS_UART_DETECT__  // !!! don't detect the IO pin, bcz it will be sometimes false alarm.
 static void Main_ApsUartRxDectecCb(E_GpioIdx_t tGpioIdx);
@@ -133,6 +128,8 @@ void __Patch_EntryPoint(void)
 #if (SWITCH_TO_32K_RC == 1)
     // Uncomment this function when the device is without 32k XTAL.
     Sys_SwitchTo32kRC();
+#else
+    ps_32k_xtal_measure(200);
 #endif
 
     // update the pin mux
@@ -158,9 +155,6 @@ void __Patch_EntryPoint(void)
 
     // application init
     Sys_AppInit = Main_AppInit_patch;
-#ifdef __BLEWIFI_TRANSPARENT__
-    at_blewifi_init_adpt = Main_BleWifiInit;
-#endif
 }
 
 /*************************************************************************
@@ -223,10 +217,6 @@ static void Main_PinMuxUpdate(void)
 *************************************************************************/
 static void Main_FlashLayoutUpdate(void)
 {
-#ifdef __BLEWIFI_TRANSPARENT__
-    MwFim_GroupInfoUpdate(0, 8, (T_MwFimFileInfo *)g_taMwFimGroupTable11_project);
-    MwFim_GroupVersionUpdate(0, 8, MW_FIM_VER11_PROJECT);
-#else
     g_taMwFimZoneInfoTable[1].ulBaseAddr = 0x00090000;
     g_taMwFimZoneInfoTable[1].ulBlockNum = 9;
 
@@ -242,7 +232,6 @@ static void Main_FlashLayoutUpdate(void)
     MwFim_GroupVersionUpdate(1, 6, MW_FIM_VER16_PROJECT);
     MwFim_GroupVersionUpdate(1, 7, MW_FIM_VER17_PROJECT);
     MwFim_GroupVersionUpdate(1, 8, MW_FIM_VER18_PROJECT);
-#endif
 }
 
 /*************************************************************************
@@ -335,35 +324,10 @@ static void Main_AppInit_patch(void)
     // add the application initialization from here
     printf("AppInit\n");
 
-#ifdef __BLEWIFI_TRANSPARENT__
-    // the blewifi init will be triggered by AT Cmd
-#else
-	AppInit();
-#endif
-}
+    sys_cfg_clk_set(SYS_CLK_RATE);
 
-/*************************************************************************
-* FUNCTION:
-*   Main_BleWifiInit
-*
-* DESCRIPTION:
-*   the initial of application by AT Cmd
-*
-* PARAMETERS
-*   none
-*
-* RETURNS
-*   none
-*
-*************************************************************************/
-#ifdef __BLEWIFI_TRANSPARENT__
-static int Main_BleWifiInit(void)
-{
 	AppInit();
-
-    return 0;
 }
-#endif
 
 /*************************************************************************
 * FUNCTION:

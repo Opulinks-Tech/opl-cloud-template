@@ -16,11 +16,7 @@
 /*
 Smart sleep
 */
-#ifdef __BLEWIFI_TRANSPARENT__
-#define BLEWIFI_COM_POWER_SAVE_EN       (0)     // 1: enable    0: disable
-#else
 #define BLEWIFI_COM_POWER_SAVE_EN       (1)     // 1: enable    0: disable
-#endif
 
 /*
 Tx Power and RSSI Offset
@@ -69,11 +65,11 @@ BLE OTA FLAG
 after the time, change the system state
 */
 #define APP_COM_SYS_TIME_INIT       (5000)      // ms from init to normal
-#define APP_COM_SYS_TIME_NORMAL     (120000)    // ms from normal to ble off
 
 
 // BLE part
-#define APP_BLE_ADV_TIMEOUT         (0)         // ms , 0 : adv forever
+#define APP_BLE_ADV_TIMEOUT                 (0)         // ms , 0 : adv forever
+#define APP_BLE_ADV_DEFAULT_INTERVAL        (100)       // ms
 /*
 BLE Service UUID
 */
@@ -105,15 +101,6 @@ unit minisecond
 */
 #define BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_PS_MIN   0xFFFF  // 30 min
 #define BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_PS_MAX   0xFFFF  // 30 min
-
-/* For the initial settings of Advertisement Interval */
-#ifdef __BLEWIFI_TRANSPARENT__
-#define BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_INIT_MIN     BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_PS_MIN
-#define BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_INIT_MAX     BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_PS_MAX
-#else
-#define BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_INIT_MIN     BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_MIN
-#define BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_INIT_MAX     BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_MAX
-#endif
 
 
 // Wifi part
@@ -191,6 +178,8 @@ RF Set TCA mode enable
 Define CR+LF Enable / Disable (Windows:CR+LF, Linux:CR and Mac:LF)
 */
 #define CRLF_ENABLE             (1)
+
+#define FLITER_STRONG_AP_EN     (1)   // 1: enable , 0:disable
 
 #endif /* __BLEWIFI_CONFIGURATION_H__ */
 

@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include "blewifi_configuration.h"
+#include "app_configuration.h"
 
 #include "msg.h"
 #include "cmsis_os.h"

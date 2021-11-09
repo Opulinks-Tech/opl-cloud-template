@@ -34,6 +34,7 @@ typedef struct
     IoT_Properity_t *taProperity;
     osSemaphoreId tRBSemaphoreId;
     uint32_t u8MaxQueueSize;
+    uint16_t u16QueueCount;
 } IoT_Ring_buffer_t;
 
 void IoT_Ring_Buffer_Init(IoT_Ring_buffer_t *pstRbData, uint8_t u8MaxQueueSize);
@@ -43,6 +44,7 @@ uint8_t IoT_Ring_Buffer_CheckEmpty(IoT_Ring_buffer_t *pstRbData);
 void IoT_Ring_Buffer_ResetBuffer(IoT_Ring_buffer_t *pstRbData);
 uint8_t IoT_Ring_Buffer_ReadIdxUpdate(IoT_Ring_buffer_t *pstRbData);
 uint8_t IoT_Ring_Buffer_CheckFull(IoT_Ring_buffer_t *pstRbData);
+uint8_t IoT_Ring_Buffer_GetQueueCount(IoT_Ring_buffer_t *pstRbData ,uint16_t *u16QueueCount);
 
 #endif // __IOT_RB_DATA_H__
 

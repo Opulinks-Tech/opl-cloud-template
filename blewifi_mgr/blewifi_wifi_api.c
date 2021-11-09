@@ -10,10 +10,12 @@
 ******************************************************************************/
 
 #include "blewifi_wifi_api.h"
-#include "blewifi_data.h"
+#include "blewifi_ble_data.h"
 #include "blewifi_configuration.h"
-#include "blewifi_server_app.h"
+#include "app_configuration.h"
+#include "blewifi_ble_server_app.h"
 #include "blewifi_ble_api.h"
+#include "blewifi_wifi_service.h"
 
 #include "cmsis_os.h"
 #include "wifi_api.h"
@@ -33,6 +35,8 @@ extern uint8_t g_ubBleWifiCtrlRequestRetryTimes;
 osTimerId    g_tAppCtrlAutoConnectTriggerTimer;
 EventGroupHandle_t g_tWifiFsmEventGroup;
 
+osSemaphoreId g_tWifiInternalSemaphoreId;
+
 //dtim event group
 EventGroupHandle_t g_tDtimEventGroup;
 
@@ -46,26 +50,11 @@ extern uint32_t g_u32TotalRetryTime;
 extern uint32_t g_u32ConnectionStartTime;
 extern uint32_t g_u32MaxOnceFailTime;
 extern uint32_t g_u32WifiConnTimeout;
+extern EventGroupHandle_t g_tAppCtrlEventGroup;
+extern uint32_t g_ulAppCtrlDoAutoConnectCumulativeTime;
+extern osMessageQId g_tBwWifiFsmCmdQueueId;
 
 uint32_t g_u32BwWifiDtimSetting = 0;
-
-static int BleWifi_Wifi_EventHandler_Start(wifi_event_id_t event_id, void *data, uint16_t length);
-static int BleWifi_Wifi_EventHandler_Connected(wifi_event_id_t event_id, void *data, uint16_t length);
-static int BleWifi_Wifi_EventHandler_Disconnected(wifi_event_id_t event_id, void *data, uint16_t length);
-static int BleWifi_Wifi_EventHandler_ScanComplete(wifi_event_id_t event_id, void *data, uint16_t length);
-static int BleWifi_Wifi_EventHandler_GotIp(wifi_event_id_t event_id, void *data, uint16_t length);
-static int BleWifi_Wifi_EventHandler_ConnectionFailed(wifi_event_id_t event_id, void *data, uint16_t length);
-static T_BleWifi_Wifi_EventHandlerTbl g_tWifiEventHandlerTbl[] =
-{
-    {WIFI_EVENT_STA_START,              BleWifi_Wifi_EventHandler_Start},
-    {WIFI_EVENT_STA_CONNECTED,          BleWifi_Wifi_EventHandler_Connected},
-    {WIFI_EVENT_STA_DISCONNECTED,       BleWifi_Wifi_EventHandler_Disconnected},
-    {WIFI_EVENT_SCAN_COMPLETE,          BleWifi_Wifi_EventHandler_ScanComplete},
-    {WIFI_EVENT_STA_GOT_IP,             BleWifi_Wifi_EventHandler_GotIp},
-    {WIFI_EVENT_STA_CONNECTION_FAILED,  BleWifi_Wifi_EventHandler_ConnectionFailed},
-
-    {0xFFFFFFFF,                        NULL}
-};
 
 static int _BleWifi_Wifi_GetManufName(uint8_t *pu8Name)
 {
@@ -141,13 +130,14 @@ int _BleWifi_Wifi_SetDTIM(blewifi_wifi_set_dtim_t *pstDtimSetting)
         else
         {
             BleWifi_COM_EventStatusSet(g_tDtimEventGroup, pstDtimSetting->u32DtimEventBit , false);
-            
+
             if((true == BleWifi_COM_EventStatusGet(g_tDtimEventGroup, BW_WIFI_DTIM_EVENT_BIT_TX_USE))
                 ||(true == BleWifi_COM_EventStatusGet(g_tDtimEventGroup, BW_WIFI_DTIM_EVENT_BIT_RX_USE))
                 ||(true == BleWifi_COM_EventStatusGet(g_tDtimEventGroup, BW_WIFI_DTIM_EVENT_BIT_OTA_USE))
-                ||(true == BleWifi_COM_EventStatusGet(g_tDtimEventGroup, BW_WIFI_DTIM_EVENT_BIT_DHCP_USE)))
+                ||(true == BleWifi_COM_EventStatusGet(g_tDtimEventGroup, BW_WIFI_DTIM_EVENT_BIT_DHCP_USE))
+                ||(true == BleWifi_COM_EventStatusGet(g_tDtimEventGroup, BW_WIFI_DTIM_EVENT_BIT_TX_CLOUD_ACK_POST)))
             {
-                printf("Set dtim fail\r\n");
+                printf("Dtim no change\r\n");
                 return 0;
             }
         }
@@ -179,124 +169,6 @@ void BleWifi_Wifi_UpdateBeaconInfo(void)
     // error handle
     if (g_ulBleWifi_Wifi_BeaconTime == 0)
         g_ulBleWifi_Wifi_BeaconTime = 100;
-}
-
-static int BleWifi_Wifi_EventHandler_Start(wifi_event_id_t event_id, void *data, uint16_t length)
-{
-    blewifi_wifi_set_dtim_t stSetDtim = {0};
-
-    printf("\r\nWi-Fi Start \r\n");
-
-    /* Tcpip stack and net interface initialization,  dhcp client process initialization. */
-    lwip_network_init(WIFI_MODE_STA);
-
-    /* DTIM */
-    stSetDtim.u32DtimValue = 0;
-    stSetDtim.u32DtimEventBit = BW_WIFI_DTIM_EVENT_BIT_DHCP_USE;
-    BleWifi_Wifi_Set_Config(BLEWIFI_WIFI_SET_DTIM , (void *)&stSetDtim);
-
-    BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_INIT_COMPLETE, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
-
-//    BleWifi_Ctrl_MsgSend(BLEWIFI_CTRL_MSG_WIFI_INIT_COMPLETE, NULL, 0);
-
-    return 0;
-}
-
-static int BleWifi_Wifi_EventHandler_Connected(wifi_event_id_t event_id, void *data, uint16_t length)
-{
-    uint8_t reason = *((uint8_t*)data);
-
-    printf("\r\nWi-Fi Connected, reason %d \r\n", reason);
-//    lwip_net_start(WIFI_MODE_STA);
-    BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_CONNECTION_SUCCESS_IND, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
-//    BleWifi_Ctrl_MsgSend(BLEWIFI_CTRL_MSG_WIFI_CONNECTION_IND, NULL, 0);
-
-    return 0;
-}
-
-static int BleWifi_Wifi_EventHandler_Disconnected(wifi_event_id_t event_id, void *data, uint16_t length)
-{
-    uint8_t reason = *((uint8_t*)data);
-
-    printf("\r\nWi-Fi Disconnected , reason %d\r\n", reason);
-    BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_DISCONNECTION_IND, &reason, sizeof(uint8_t) , NULL, BLEWIFI_QUEUE_BACK);
-//    g_wifi_disconnectedDoneForAppDoWIFIScan = 1;
-
-//    if ( reason == 255 ) {
-//        /* Reset the beacon time (ms) */
-//        g_ulBleWifi_Wifi_BeaconTime = 100;
-
-//        /* DTIM */
-//        BleWifi_Wifi_SetDTIM(0);
-
-//        BleWifi_Ctrl_MsgSend(BLEWIFI_CTRL_MSG_WIFI_RESET_DEFAULT_IND, NULL, 0);
-//    }
-//    else
-//    {
-//        BleWifi_Ctrl_MsgSend(BLEWIFI_CTRL_MSG_WIFI_DISCONNECTION_IND, NULL, 0);
-//    }
-
-    return 0;
-}
-
-static int BleWifi_Wifi_EventHandler_ScanComplete(wifi_event_id_t event_id, void *data, uint16_t length)
-{
-    printf("\r\nWi-Fi Scan Done \r\n");
-//    BleWifi_Ctrl_MsgSend(BLEWIFI_CTRL_MSG_WIFI_SCAN_DONE_IND, NULL, 0);
-    BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_SCAN_DONE_IND, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
-
-    return 0;
-}
-
-static int BleWifi_Wifi_EventHandler_GotIp(wifi_event_id_t event_id, void *data, uint16_t length)
-{
-    printf("\r\nWi-Fi Got IP \r\n");
-    BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_GOT_IP_IND, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
-//    BleWifi_Ctrl_MsgSend(BLEWIFI_CTRL_MSG_WIFI_GOT_IP_IND, NULL, 0);
-
-    return 0;
-}
-
-static int BleWifi_Wifi_EventHandler_ConnectionFailed(wifi_event_id_t event_id, void *data, uint16_t length)
-{
-    uint8_t reason = *((uint8_t*)data);
-
-    printf("\r\nWi-Fi Connected failed, reason %d\r\n", reason);
-    BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_CONNECTION_FAIL_IND, &reason, sizeof(uint8_t) , NULL, BLEWIFI_QUEUE_BACK);
-
-    return 0;
-}
-
-// it is used in the Wifi task
-int BleWifi_Wifi_EventHandlerCb(wifi_event_id_t event_id, void *data, uint16_t length)
-{
-    uint32_t i = 0;
-    int lRet = 0;
-
-#ifdef __BLEWIFI_TRANSPARENT__
-    at_wifi_event_update_status(event_id, data, length);
-#endif
-
-    while (g_tWifiEventHandlerTbl[i].ulEventId != 0xFFFFFFFF)
-    {
-        // match
-        if (g_tWifiEventHandlerTbl[i].ulEventId == event_id)
-        {
-            lRet = g_tWifiEventHandlerTbl[i].fpFunc(event_id, data, length);
-            break;
-        }
-
-        i++;
-    }
-
-    // not match
-    if (g_tWifiEventHandlerTbl[i].ulEventId == 0xFFFFFFFF)
-    {
-        printf("\r\n Unknown Event %d \r\n", event_id);
-        lRet = 1;
-    }
-
-    return lRet;
 }
 
 int BleWifi_Wifi_Query_Status(uint32_t u32QueryType , void *pu8QueryData)
@@ -345,7 +217,7 @@ int BleWifi_Wifi_Query_Status(uint32_t u32QueryType , void *pu8QueryData)
             break;
         case BLEWFII_WIFI_GET_SCAN_LIST:
             p_scan_list = (wifi_scan_list_t*) pu8QueryData;
-            wifi_scan_get_ap_list(p_scan_list);        
+            wifi_scan_get_ap_list(p_scan_list);
         default:
             break;
     }
@@ -380,7 +252,16 @@ int BleWifi_Wifi_Set_Config(uint32_t u32SetType , void *pu8SetData)
 
 void BleWifi_Wifi_Init(void)
 {
+    osSemaphoreDef_t tSemaphoreDef;
     osTimerDef_t timer_auto_connect_def;
+
+    // create the semaphore . If need access g_tBwWifiFsmMsgQueueId , it must to lock.
+    tSemaphoreDef.dummy = 0;                            // reserved, it is no used
+    g_tWifiInternalSemaphoreId = osSemaphoreCreate(&tSemaphoreDef, 1);
+    if (g_tWifiInternalSemaphoreId == NULL)
+    {
+        printf("wifi: create the semaphore fail \r\n");
+    }
 
     /* WiFi FSM */
     BleWifi_Wifi_FSM_Init();
@@ -404,9 +285,13 @@ void BleWifi_Wifi_Init(void)
         BLEWIFI_ERROR("create dtim event group fail \r\n");
     }
 
-    BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_INIT, NULL , 0 , BleWifi_Wifi_Init_Done_CB, BLEWIFI_QUEUE_BACK);
+    osSemaphoreWait(g_tWifiInternalSemaphoreId, osWaitForever);
+
+    BleWifi_Wifi_FSM_CmdPush_Without_Check(BW_WIFI_FSM_MSG_WIFI_REQ_INIT, NULL , 0 , BleWifi_Wifi_Init_Done_CB, BLEWIFI_QUEUE_BACK);
 
     BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+
+    osSemaphoreRelease(g_tWifiInternalSemaphoreId);
 
     /* Init the DTIM time (ms) */
     g_u32BwWifiDtimSetting = BLEWIFI_WIFI_DTIM_INTERVAL;
@@ -414,20 +299,33 @@ void BleWifi_Wifi_Init(void)
 
 int32_t BleWifi_Wifi_Scan_Req(wifi_scan_config_t *scan_config)
 {
+    osSemaphoreWait(g_tWifiInternalSemaphoreId, osWaitForever);
+
     printf("BleWifi_Wifi_Scan_Req\n");
-    BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_SCAN, (uint8_t*)scan_config, sizeof(wifi_scan_config_t), BleWifi_Wifi_Scan_Done_CB, BLEWIFI_QUEUE_BACK);
+    BleWifi_Wifi_FSM_CmdPush_Without_Check(BW_WIFI_FSM_MSG_WIFI_REQ_SCAN, (uint8_t*)scan_config, sizeof(wifi_scan_config_t), BleWifi_Wifi_Scan_Done_CB, BLEWIFI_QUEUE_BACK);
 
     BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+
+    osSemaphoreRelease(g_tWifiInternalSemaphoreId);
+
     return 0;
 }
 
 int32_t BleWifi_Wifi_Start_Conn(wifi_conn_config_t *pstWifiConnConfig)
 {
     uint8_t u8Reason = BW_WIFI_STOP_CONNECT;
+    uint8_t u8OriUsed = false;
+
+    osSemaphoreWait(g_tWifiInternalSemaphoreId, osWaitForever);
+
+    u8OriUsed = BleWifi_COM_EventStatusGet(g_tWifiFsmEventGroup, BW_WIFI_FSM_EVENT_BIT_WIFI_USED);
+
+    BleWifi_COM_EventStatusSet(g_tWifiFsmEventGroup, BW_WIFI_FSM_EVENT_BIT_WIFI_USED, true);
 
     g_u32TotalRetryTime = 0;
     g_u32MaxOnceFailTime = 0;
     g_u32ConnectionStartTime = osKernelSysTick();
+    g_ulAppCtrlDoAutoConnectCumulativeTime = 0;
 
     if(0==pstWifiConnConfig->conn_timeout || pstWifiConnConfig == NULL)
     {
@@ -439,22 +337,42 @@ int32_t BleWifi_Wifi_Start_Conn(wifi_conn_config_t *pstWifiConnConfig)
     }
 
     printf("BleWifi_Wifi_Start_Conn = 0x%02x, %d\n", BW_WIFI_FSM_MSG_WIFI_REQ_CONNECT, g_u32WifiConnTimeout);
-    BleWifi_COM_EventStatusSet(g_tWifiFsmEventGroup, BW_WIFI_FSM_EVENT_BIT_EXEC_AUTO_CONN, false);
 
     if(NULL != pstWifiConnConfig)
     {
         g_BwWifiReqConnRetryTimes = 0;
-        BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_DISCONNECT, &u8Reason, sizeof(uint8_t), NULL, BLEWIFI_QUEUE_BACK);
+        BleWifi_Wifi_FSM_CmdPush_Without_Check(BW_WIFI_FSM_MSG_WIFI_REQ_DISCONNECT, &u8Reason, sizeof(uint8_t), NULL , BLEWIFI_QUEUE_BACK);
 
-        BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_CONNECT, (uint8_t*)pstWifiConnConfig, sizeof(wifi_conn_config_t), NULL, BLEWIFI_QUEUE_BACK);
+        BleWifi_Wifi_FSM_CmdPush_Without_Check(BW_WIFI_FSM_MSG_WIFI_REQ_CONNECT, (uint8_t*)pstWifiConnConfig, sizeof(wifi_conn_config_t), NULL, BLEWIFI_QUEUE_BACK);
         BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
     }
     else
     {
         //Execute Auto conn here
-        BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_AUTO_CONNECT, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
-        BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+        g_u32AppCtrlAutoConnectIntervalSelect = 0;
+
+        // not first time
+        if (u8OriUsed == true)
+        {
+            // reset timer
+            if (true == BleWifi_COM_EventStatusGet(g_tWifiFsmEventGroup, BW_WIFI_FSM_EVENT_BIT_EXEC_AUTO_CONN))
+            {
+                osTimerStop(g_tAppCtrlAutoConnectTriggerTimer);
+                BleWifi_COM_EventStatusSet(g_tWifiFsmEventGroup, BW_WIFI_FSM_EVENT_BIT_EXEC_AUTO_CONN, false);
+
+                BleWifi_Wifi_FSM_CmdPush_Without_Check(BW_WIFI_FSM_MSG_WIFI_REQ_AUTO_CONNECT, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+                BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+            }
+        }
+        // the first time
+        else
+        {
+            BleWifi_Wifi_FSM_CmdPush_Without_Check(BW_WIFI_FSM_MSG_WIFI_REQ_AUTO_CONNECT, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+            BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+        }
     }
+
+    osSemaphoreRelease(g_tWifiInternalSemaphoreId);
 
     return 0;
 }
@@ -462,27 +380,41 @@ int32_t BleWifi_Wifi_Stop_Conn(void)
 {
     uint8_t u8Reason = BW_WIFI_STOP_CONNECT;
 
-    printf("BleWifi_Wifi_Reset_Req = 0x%02x\n", BW_WIFI_FSM_MSG_WIFI_DISCONNECTION_IND);
-    BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_DISCONNECT, &u8Reason, sizeof(uint8_t), NULL, BLEWIFI_QUEUE_BACK);
+    printf("BleWifi_Wifi_Stop_Conn = 0x%02x\n", BW_WIFI_FSM_MSG_WIFI_REQ_DISCONNECT);
+
+    osSemaphoreWait(g_tWifiInternalSemaphoreId, osWaitForever);
+
+    BleWifi_COM_EventStatusSet(g_tWifiFsmEventGroup, BW_WIFI_FSM_EVENT_BIT_WIFI_USED, false);
+
+    BwWifiFlushCMD(g_tBwWifiFsmCmdQueueId);
+
+    BleWifi_Wifi_FSM_CmdPush_Without_Check(BW_WIFI_FSM_MSG_WIFI_REQ_DISCONNECT, &u8Reason, sizeof(uint8_t), BleWifi_Wifi_Req_Disconnected_CB, BLEWIFI_QUEUE_BACK);
+
+    BleWifi_Wifi_FSM_CmdPush_Without_Check(BW_WIFI_FSM_MSG_WIFI_STOP, NULL , 0 , BleWifi_Wifi_Stop_CB, BLEWIFI_QUEUE_BACK);
 
     BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+
+    osSemaphoreRelease(g_tWifiInternalSemaphoreId);
+
     return 0;
 }
 
 int32_t BleWifi_Wifi_Reset_Req(void)
 {
-    uint8_t u8Reason = BW_WIFI_RESET;
     int sRet = 0;
+
+    osSemaphoreWait(g_tWifiInternalSemaphoreId, osWaitForever);
 
     SsidPwdClear();
 
     printf("BleWifi_Wifi_Reset_Req \n");
 
-    BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_DISCONNECT, &u8Reason, sizeof(uint8_t), NULL, BLEWIFI_QUEUE_BACK);
-    BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
-
     sRet = wifi_auto_connect_reset();
     BleWifi_Ble_SendResponse(BLEWIFI_RSP_RESET, sRet);
+
+    osSemaphoreRelease(g_tWifiInternalSemaphoreId);
+
+    BleWifi_Wifi_Stop_Conn();
 
     return 0;
 }

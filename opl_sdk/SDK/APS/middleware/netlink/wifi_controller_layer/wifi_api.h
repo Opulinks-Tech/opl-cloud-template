@@ -169,6 +169,17 @@ int wifi_start(void);
 int wifi_stop(void);
 
 /**
+  * @brief  Reset wifi status
+  *         When receive the disconnect event with reascon code (255), means the something wrong in OPL1000.
+  *         User must be invoke the wifi_reset function try to reset the status to idle.
+  *         Return 0 means the reset is successfully.
+  *
+  * @return    0  : success
+  * @return    other : failed
+  */
+int wifi_reset(void);
+
+/**
   * @brief     Scan all available APs.
   *            After invoke the #wifi_set_config() and #wifi_start(), then call #wifi_scan_start() to scan APs
   *
@@ -340,6 +351,26 @@ int wifi_connection_unregister_event_handler(wifi_event_t event, wifi_event_hand
 
 int wifi_config_set_opmode(uint8_t mode);
 int wifi_config_get_opmode(uint8_t *mode);
+
+/**
+  * @brief set the structure of wifi country code
+  *
+  * @param[in] the structure of wifi country code, please refer to wifi_types.h
+  *
+  * @return    0  : success
+  * @return    other : failed
+  */
+int wifi_set_country(const wifi_country_t *country);
+
+/**
+  * @brief get the structure of wifi country code
+  *
+  * @param[in] the structure of wifi country code, please refer to wifi_types.h
+  *
+  * @return    0  : success
+  * @return    other : failed
+  */
+int wifi_get_country(wifi_country_t *country);
 
 /**
   * @brief     Get mac of specified interface

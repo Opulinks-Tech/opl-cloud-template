@@ -78,6 +78,9 @@ typedef struct {
     uint8_t  auth_mode;                        /**< Please refer to the definition of #wifi_auth_mode_t. */
     int8_t   rssi;                             /**< Records the RSSI value when probe response is received. */
     uint8_t  connected;                        /**< AP was connected before. */
+#if (1 == FLITER_STRONG_AP_EN)
+    uint8_t  u8IgnoreReport;                   /**< if scan list has the same SSID , the weak RSSI AP don't report*/
+#endif
 }__attribute__((packed)) blewifi_scan_info_t;
 
 /** @brief This structure defines the information of device
@@ -155,7 +158,7 @@ typedef enum {
     BLEWIFI_WIFI_GET_AUTO_CONN_AP_NUM        = 0x13,
     BLEWIFI_WIFI_GET_AUTO_CONN_AP_INFO       = 0x14,
     BLEWFII_WIFI_GET_AUTO_CONN_LIST_NUM      = 0x15,
-    BLEWFII_WIFI_GET_SCAN_LIST               = 0x16,    
+    BLEWFII_WIFI_GET_SCAN_LIST               = 0x16,
 } blewifi_wifi_query_type_t;
 
 typedef enum {
@@ -166,11 +169,12 @@ typedef enum {
 } blewifi_wifi_set_type_t;
 
 //////////// Dtim event group use   ////////////////////////
-#define BW_WIFI_DTIM_EVENT_BIT_TX_USE          0x00000001U
-#define BW_WIFI_DTIM_EVENT_BIT_RX_USE          0x00000002U
-#define BW_WIFI_DTIM_EVENT_BIT_OTA_USE         0x00000004U
-#define BW_WIFI_DTIM_EVENT_BIT_DHCP_USE        0x00000008U
-#define BW_WIFI_DTIM_EVENT_BIT_APP_AT_USE      0x00000010U
+#define BW_WIFI_DTIM_EVENT_BIT_TX_USE                 0x00000001U
+#define BW_WIFI_DTIM_EVENT_BIT_RX_USE                 0x00000002U
+#define BW_WIFI_DTIM_EVENT_BIT_OTA_USE                0x00000004U
+#define BW_WIFI_DTIM_EVENT_BIT_DHCP_USE               0x00000008U
+#define BW_WIFI_DTIM_EVENT_BIT_APP_AT_USE             0x00000010U
+#define BW_WIFI_DTIM_EVENT_BIT_TX_CLOUD_ACK_POST      0x00000020U
 ////////////////////////////////////////////////////////////
 
 
@@ -189,9 +193,10 @@ typedef struct {
     uint32_t conn_timeout;
 } wifi_conn_config_t;
 
+extern osSemaphoreId g_tWifiInternalSemaphoreId;
+
 void BleWifi_Wifi_UpdateBeaconInfo(void);
 
-int BleWifi_Wifi_EventHandlerCb(wifi_event_id_t event_id, void *data, uint16_t length);
 int BleWifi_Wifi_Query_Status(uint32_t u32QueryType , void *pu8QueryData);
 int BleWifi_Wifi_Set_Config(uint32_t u32SetType , void *pu8SetData);
 void BleWifi_Wifi_Init(void);

@@ -27,6 +27,7 @@ void IoT_Ring_Buffer_Init(IoT_Ring_buffer_t *pstRbData, uint8_t u8MaxQueueSize)
     }
 
     osSemaphoreWait(pstRbData->tRBSemaphoreId, osWaitForever);
+    pstRbData->u16QueueCount = 0;
     pstRbData->ulReadIdx = 0;
     pstRbData->ulWriteIdx = 0;
     pstRbData->u8MaxQueueSize = u8MaxQueueSize;
@@ -64,6 +65,7 @@ uint8_t IoT_Ring_Buffer_Push(IoT_Ring_buffer_t *pstRbData, IoT_Properity_t *ptPr
     // update the temperature data to write index
 	memcpy(&(pstRbData->taProperity[pstRbData->ulWriteIdx]), ptProperity, sizeof(IoT_Properity_t));
     pstRbData->ulWriteIdx = ulWriteNext;
+    pstRbData->u16QueueCount++;
 
     bRet = IOT_RB_DATA_OK;
 
@@ -127,12 +129,14 @@ void IoT_Ring_Buffer_ResetBuffer(IoT_Ring_buffer_t *pstRbData)
         if(ptProperity.ubData!=NULL)
             free(ptProperity.ubData);
     }
+    pstRbData->u16QueueCount = 0;
 }
 
 uint8_t IoT_Ring_Buffer_ReadIdxUpdate(IoT_Ring_buffer_t *pstRbData)
 {
     osSemaphoreWait(pstRbData->tRBSemaphoreId, osWaitForever);
     pstRbData->ulReadIdx = (pstRbData->ulReadIdx + 1) % pstRbData->u8MaxQueueSize;
+    pstRbData->u16QueueCount --;
     osSemaphoreRelease(pstRbData->tRBSemaphoreId);
     return IOT_RB_DATA_OK;
 }
@@ -156,5 +160,13 @@ uint8_t IoT_Ring_Buffer_CheckFull(IoT_Ring_buffer_t *pstRbData)
 //done:
     osSemaphoreRelease(pstRbData->tRBSemaphoreId);
     return bRet;
+}
+
+uint8_t IoT_Ring_Buffer_GetQueueCount(IoT_Ring_buffer_t *pstRbData ,uint16_t *u16QueueCount)
+{
+    osSemaphoreWait(pstRbData->tRBSemaphoreId, osWaitForever);
+    *u16QueueCount = pstRbData->u16QueueCount;
+    osSemaphoreRelease(pstRbData->tRBSemaphoreId);
+    return IOT_RB_DATA_OK;
 }
 

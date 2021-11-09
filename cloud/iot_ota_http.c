@@ -29,6 +29,8 @@
 #include "iot_configuration.h"
 #include "app_ctrl.h"
 #include "blewifi_wifi_api.h"
+#include "controller_wifi.h"
+#include "controller_wifi_com.h"
 
 #if (IOT_WIFI_OTA_FUNCTION_EN == 1)
 /****************************************************************************
@@ -36,9 +38,11 @@
  ****************************************************************************/
 osThreadId   g_tIotHttpOtaTaskId;
 osMessageQId g_tIotHttpOtaQueueId;
+osTimerId    g_tIotHttpOtaSwReset_timer = NULL;
 
 static httpclient_t g_tIotOta_Httpclient = {0};
 static const char *TAG = "ota";
+#define HTTPCLIENT_TIMEOUT_TIME  (5000)
 
 static int _IoT_OTA_HTTP_Retrieve_Offset_Server_Version(httpclient_t *client, httpclient_data_t *client_data, int offset, int parse_hdr, uint16_t *uwfid)
 {
@@ -376,6 +380,8 @@ int IoT_OTA_HTTP_Download(char *param)
 
     lwip_auto_arp_enable(1, 0);
 
+    g_tIotOta_Httpclient.timeout_ms = HTTPCLIENT_TIMEOUT_TIME;
+
     // Connect to server
     do
     {
@@ -443,11 +449,15 @@ void IoT_OTA_HTTP_Task_Evt_Handler(uint32_t u32EventType, void *pData, uint32_t 
             stSetDtim.u32DtimEventBit = BW_WIFI_DTIM_EVENT_BIT_OTA_USE;
             BleWifi_Wifi_Set_Config(BLEWIFI_WIFI_SET_DTIM , (void *)&stSetDtim);
 
+            lwip_one_shot_arp_enable();
+            CtrlWifi_PsStateForce(STA_PS_AWAKE_MODE, 0);
+
             if (IoT_OTA_HTTP_Download(pData) != 0)
             {
                 stSetDtim.u32DtimValue = BleWifi_Wifi_GetDtimSetting();
                 stSetDtim.u32DtimEventBit = BW_WIFI_DTIM_EVENT_BIT_OTA_USE;
                 BleWifi_Wifi_Set_Config(BLEWIFI_WIFI_SET_DTIM , (void *)&stSetDtim);
+                CtrlWifi_PsStateForce(STA_PS_NONE, 0);
 
                 App_Ctrl_MsgSend(APP_CTRL_MSG_OTHER_OTA_OFF_FAIL, NULL, 0);
             }
@@ -456,6 +466,7 @@ void IoT_OTA_HTTP_Task_Evt_Handler(uint32_t u32EventType, void *pData, uint32_t 
                 stSetDtim.u32DtimValue = BleWifi_Wifi_GetDtimSetting();
                 stSetDtim.u32DtimEventBit = BW_WIFI_DTIM_EVENT_BIT_OTA_USE;
                 BleWifi_Wifi_Set_Config(BLEWIFI_WIFI_SET_DTIM , (void *)&stSetDtim);
+                CtrlWifi_PsStateForce(STA_PS_NONE, 0);
 
                 App_Ctrl_MsgSend(APP_CTRL_MSG_OTHER_OTA_OFF, NULL, 0);
             }
@@ -478,13 +489,26 @@ void IoT_OTA_HTTP_Task(void *args)
         if(rxEvent.status != osEventMessage)
             continue;
 
+        osTimerStop(g_tIotHttpOtaSwReset_timer);
+        osTimerStart(g_tIotHttpOtaSwReset_timer, SW_RESET_TIME);
+
         rxMsg = (xIotOtaHttpMessage_t *)rxEvent.value.p;
         IoT_OTA_HTTP_Task_Evt_Handler(rxMsg->u32Event, rxMsg->u8aMessage, rxMsg->u32Length);
 
         /* Release buffer */
         if (rxMsg != NULL)
+        {
             free(rxMsg);
+        }
+
+        osTimerStop(g_tIotHttpOtaSwReset_timer);
     }
+}
+
+static void IoT_OTA_SwReset_TimeOutCallBack(void const *argu)
+{
+    tracer_drct_printf("OTA sw reset\r\n");
+    Hal_Sys_SwResetAll();
 }
 
 int IoT_OTA_HTTP_Msg_Send(uint32_t u32MsgType, uint8_t *pu8Data, uint32_t u32DataLen)
@@ -537,6 +561,7 @@ void IoT_OTA_HTTP_Init(void)
 {
     osThreadDef_t task_def;
     osMessageQDef_t queue_def;
+    osTimerDef_t tTimerDef;
 
     /* Create message queue*/
     queue_def.item_sz = sizeof(xIotOtaHttpMessage_t);
@@ -556,6 +581,14 @@ void IoT_OTA_HTTP_Init(void)
     if(g_tIotHttpOtaTaskId == NULL)
     {
         LOG_E(TAG, "create task fail \r\n");
+    }
+
+    /* create OTA sw reset timeout timer */
+    tTimerDef.ptimer = IoT_OTA_SwReset_TimeOutCallBack;
+    g_tIotHttpOtaSwReset_timer = osTimerCreate(&tTimerDef, osTimerOnce, NULL);
+    if (g_tIotHttpOtaSwReset_timer == NULL)
+    {
+        BLEWIFI_ERROR("BLEWIFI: create g_tIotHttpOtaSwReset_timer timer fail \r\n");
     }
 }
 

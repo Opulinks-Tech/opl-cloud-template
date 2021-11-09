@@ -20,6 +20,8 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #include "lwip/errno.h"
+#include "sys_cfg.h"
+#include "cmsis_os.h"
 
 #ifdef HTTPCLIENT_SSL_ENABLE
 #include "mbedtls/debug.h"
@@ -53,6 +55,10 @@
 #define DEBUG_LEVEL 2
 #endif
 
+#define SSL_NET_SEND_TIMEOUT            (5) // sec
+#define SSL_HANDSHAKE_TIMEOUT           (4600) // ms
+#define SSL_SOCKET_TIMEOUT              (5000) // ms
+
 // static int httpclient_parse_host(char *url, char *host, size_t maxhost_len);
 static int httpclient_parse_url(const char *url, char *scheme, size_t max_scheme_len, char *host, size_t maxhost_len, int *port, char *path, size_t max_path_len);
 static int httpclient_tcp_send_all(int sock_fd, char *data, int length);
@@ -66,6 +72,106 @@ static int httpclient_ssl_send_all(mbedtls_ssl_context *ssl, const char *data, s
 static int httpclient_ssl_nonblock_recv(void *ctx, unsigned char *buf, size_t len);
 static int httpclient_ssl_close(httpclient_t *client);
 #endif
+
+static int mbedtls_net_errno(int fd)
+{
+    int sock_errno = 0;
+    u32_t optlen = sizeof(sock_errno);
+
+    getsockopt(fd, SOL_SOCKET, SO_ERROR, &sock_errno, &optlen);
+
+    return sock_errno;
+}
+
+static int net_would_block( const mbedtls_net_context *ctx, int *errout )
+{
+    int error = mbedtls_net_errno(ctx->fd);
+
+    if ( errout ) {
+        *errout = error;
+    }
+
+    /*
+     * Never return 'WOULD BLOCK' on a non-blocking socket
+     */
+    if ( ( fcntl( ctx->fd, F_GETFL, 0) & O_NONBLOCK ) != O_NONBLOCK ) {
+        return ( 0 );
+    }
+
+    switch ( error ) {
+#if defined EAGAIN
+    case EAGAIN:
+#endif
+#if defined EWOULDBLOCK && EWOULDBLOCK != EAGAIN
+    case EWOULDBLOCK:
+#endif
+        return ( 1 );
+    }
+    return ( 0 );
+}
+
+static int tcp_poll_write(int fd, int timeout_ms)
+{
+    fd_set writeset;
+    FD_ZERO(&writeset);
+    FD_SET(fd, &writeset);
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+    return select(fd + 1, NULL, &writeset, NULL, &timeout);
+}
+
+static int mbedtls_net_send_timeout( void *ctx, const unsigned char *buf, size_t len )
+{
+    int ret;
+    int fd = ((mbedtls_net_context *) ctx)->fd;
+    int error = 0;
+    struct timeval t;
+
+    if ( fd < 0 ) {
+        return ( MBEDTLS_ERR_NET_INVALID_CONTEXT );
+    }
+#if 0
+    if ((ret = tcp_poll_write(fd, 2000)) <= 0) {
+        hal_err("tcp write timeout");
+
+        return -1;//select timeout, error
+    }
+#endif
+    //hal_err("write B");
+    t.tv_sec = SSL_NET_SEND_TIMEOUT;
+    t.tv_usec = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &t, sizeof(t)) != 0) {
+        //printf("set timeout failed.\n");
+
+        if ((ret = tcp_poll_write(fd, (SSL_NET_SEND_TIMEOUT * 1000))) <= 0) {
+            printf("tcp write timeout");
+
+            return -1;//select timeout, error
+        }
+    }
+    ret = (int) write( fd, buf, len );
+    //hal_err("write E");
+    if ( ret < 0 ) {
+        printf("write fail, ret[%d]", ret);
+
+        if ( net_would_block( ctx, &error ) != 0 ) {
+            return ( MBEDTLS_ERR_SSL_WANT_WRITE );
+        }
+
+        if ( error == EPIPE || error == ECONNRESET ) {
+            return ( MBEDTLS_ERR_NET_CONN_RESET );
+        }
+
+        if ( error == EINTR ) {
+            return ( MBEDTLS_ERR_SSL_WANT_WRITE );
+        }
+
+        return ( MBEDTLS_ERR_NET_SEND_FAILED );
+    }
+
+    return ( ret );
+}
 
 static void httpclient_base64enc(char *out, const char *in)
 {
@@ -267,6 +373,11 @@ int httpclient_conn(httpclient_t *client, char *host)
 
     freeaddrinfo( addr_list );
 
+    if (ret == HTTPCLIENT_OK)
+    {
+       client->net_handle = 1;
+    }
+
     return ret;
 }
 
@@ -308,7 +419,7 @@ int httpclient_parse_url(const char *url, char *scheme, size_t max_scheme_len, c
     } else {
         *port = 0;
     }
-    
+
     if ( host_len == 0 ) {
         host_len = path_ptr - host_ptr;
     }
@@ -584,8 +695,11 @@ int httpclient_recv(httpclient_t *client, char *buf, int min_len, int max_len, i
     size_t readLen = 0;
     struct timeval tv;
 
-    ms_to_timeval(client->timeout_ms, &tv);
-    setsockopt(client->socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (client->is_http)
+    {
+        ms_to_timeval(client->timeout_ms, &tv);
+        setsockopt(client->socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    }
 
     while (readLen < max_len) {
         buf[readLen] = '\0';
@@ -609,13 +723,16 @@ int httpclient_recv(httpclient_t *client, char *buf, int min_len, int max_len, i
 #ifdef HTTPCLIENT_SSL_ENABLE
         else {
             httpclient_ssl_t *ssl = (httpclient_ssl_t *)client->ssl;
+            mbedtls_ssl_conf_read_timeout(&ssl->ssl_conf, client->timeout_ms);
+
         #if 1
             if (readLen < min_len) {
-                mbedtls_ssl_set_bio(&ssl->ssl_ctx, &ssl->net_ctx, mbedtls_net_send, mbedtls_net_recv, NULL);
+
+                mbedtls_ssl_set_bio(&ssl->ssl_ctx, &ssl->net_ctx, mbedtls_net_send_timeout, mbedtls_net_recv, mbedtls_net_recv_timeout);
                 ret = mbedtls_ssl_read(&ssl->ssl_ctx, (unsigned char *)buf + readLen, min_len - readLen);
                 DBG("mbedtls_ssl_read [blocking] return:%d", ret);
             } else {
-                mbedtls_ssl_set_bio(&ssl->ssl_ctx, &ssl->net_ctx, mbedtls_net_send, httpclient_ssl_nonblock_recv, NULL);
+                mbedtls_ssl_set_bio(&ssl->ssl_ctx, &ssl->net_ctx, mbedtls_net_send_timeout, httpclient_ssl_nonblock_recv, NULL);
                 ret = mbedtls_ssl_read(&ssl->ssl_ctx, (unsigned char *)buf + readLen, max_len - readLen);
                 DBG("mbedtls_ssl_read [not blocking] return:%d", ret);
                 if (ret == -1 && errno == EWOULDBLOCK) {
@@ -730,9 +847,20 @@ int httpclient_retrieve_content(httpclient_t *client, char *data, int len, httpc
                 }
             } while (!foundCrlf);
             data[crlf_pos] = '\0';
-            n = sscanf(data, "%x", &readLen);/* chunk length */
+            //n = sscanf(data, "%x", &readLen);/* chunk length */
+
+            readLen = strtoul(data, NULL, 16);
+            printf("chunk len=%d\n",readLen);
+            n = (0 == readLen) ? 0 : 1;
             client_data->retrieve_len = readLen;
             client_data->response_content_len += client_data->retrieve_len;
+            if ( readLen == 0 ) {
+                /* Last chunk */
+                client_data->is_more = false;
+                printf("no more (last chunk)\n");
+                break;
+            }
+
             if (n != 1) {
                 ERR("Could not read chunk length");
                 return HTTPCLIENT_ERROR_PRTCL;
@@ -741,12 +869,7 @@ int httpclient_retrieve_content(httpclient_t *client, char *data, int len, httpc
             memmove(data, &data[crlf_pos + 2], len - (crlf_pos + 2)); /* Not need to move NULL-terminating char any more */
             len -= (crlf_pos + 2);
 
-            if ( readLen == 0 ) {
-                /* Last chunk */
-                client_data->is_more = false;
-                DBG("no more (last chunk)");
-                break;
-            }
+
         } else {
             readLen = client_data->retrieve_len;
         }
@@ -849,7 +972,7 @@ int httpclient_response_parse(httpclient_t *client, char *data, int len, httpcli
         WARN("Response code %d", client->response_code);
     }
 
-    DBG("Reading headers%s", data);
+    DBG("Reading header :%s", data);
 
     memmove(data, &data[crlf_pos + 2], len - (crlf_pos + 2) + 1); /* Be sure to move NULL-terminating char as well */
     len -= (crlf_pos + 2);
@@ -976,6 +1099,11 @@ HTTPCLIENT_RESULT httpclient_connect(httpclient_t *client, char *url)
         }
     }
 #endif
+
+    if (ret == HTTPCLIENT_OK)
+    {
+       client->net_handle = 1;
+    }
 
 #ifdef HTTPCLIENT_TIME_DEBUG
     end_time = sys_now();
@@ -1209,7 +1337,7 @@ static int httpclient_ssl_conn(httpclient_t *client, char *host)
     char port[10] = {0};
     httpclient_ssl_t *ssl;
 
-    client->ssl = pvPortMalloc(sizeof(httpclient_ssl_t));
+    client->ssl = malloc(sizeof(httpclient_ssl_t));
     if (!client->ssl) {
         DBG("Memory malloc error.");
         ret = -1;
@@ -1219,6 +1347,20 @@ static int httpclient_ssl_conn(httpclient_t *client, char *host)
 
     if (client->server_cert)
         authmode = MBEDTLS_SSL_VERIFY_REQUIRED;
+
+
+#if 0
+    static const int ciphersuite_preference[] =
+    {
+     MBEDTLS_TLS_RSA_WITH_AES_256_CBC_SHA256,
+     MBEDTLS_TLS_RSA_WITH_AES_256_CBC_SHA,
+     MBEDTLS_TLS_RSA_WITH_AES_128_CBC_SHA256,
+     MBEDTLS_TLS_RSA_WITH_AES_128_CBC_SHA,    };
+
+    mbedtls_ssl_setup_preference_ciphersuites(ciphersuite_preference);
+#endif
+
+    mbedtls_ssl_config_max_content_len(1024*6);
 
     /*
      * Initialize the RNG and the session data
@@ -1316,18 +1458,29 @@ static int httpclient_ssl_conn(httpclient_t *client, char *host)
         goto exit;
     }
 
-    mbedtls_ssl_set_bio(&ssl->ssl_ctx, &ssl->net_ctx, mbedtls_net_send, mbedtls_net_recv, NULL);
+    mbedtls_ssl_conf_max_frag_len(&ssl->ssl_conf, MBEDTLS_SSL_MAX_FRAG_LEN_4096);
+
+    mbedtls_ssl_conf_read_timeout(&ssl->ssl_conf, SSL_HANDSHAKE_TIMEOUT);
+    mbedtls_ssl_set_bio(&ssl->ssl_ctx, &ssl->net_ctx, mbedtls_net_send_timeout, mbedtls_net_recv, mbedtls_net_recv_timeout);
+
+    printf("conf->read_timeout=%d\r\n", (ssl->ssl_conf.read_timeout));
 
     /*
     * Handshake
     */
+    sys_cfg_clk_set(SYS_CFG_CLK_143_MHZ);
+
     while ((ret = mbedtls_ssl_handshake(&ssl->ssl_ctx)) != 0) {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             DBG("mbedtls_ssl_handshake() failed, ret:-0x%x.", -ret);
             ret = -1;
+            sys_cfg_clk_set(SYS_CFG_CLK_22_MHZ);
             goto exit;
         }
     }
+
+    sys_cfg_clk_set(SYS_CFG_CLK_22_MHZ);
+    mbedtls_ssl_conf_read_timeout(&ssl->ssl_conf, SSL_SOCKET_TIMEOUT);
 
     /*
      * Verify the server certificate
@@ -1343,6 +1496,8 @@ static int httpclient_ssl_conn(httpclient_t *client, char *host)
     }
     else
         DBG("svr_cert varification ok.");
+
+    DBG("Cipher suite is %s\r\n", mbedtls_ssl_get_ciphersuite(&ssl->ssl_ctx));
 
 exit:
     DBG("ret=%d.", ret);
@@ -1369,7 +1524,7 @@ static int httpclient_ssl_close(httpclient_t *client)
     mbedtls_ctr_drbg_free(&ssl->ctr_drbg);
     mbedtls_entropy_free(&ssl->entropy);
 
-    vPortFree(ssl);
+    free(ssl);
     return 0;
 }
 #endif

@@ -31,7 +31,7 @@
 #include "app_ctrl.h"
 #include "blewifi_wifi_api.h"
 #include "blewifi_ble_api.h"
-#include "blewifi_data.h"
+#include "blewifi_ble_data.h"
 #include "mw_ota_def.h"
 #include "mw_ota.h"
 #include "hal_system.h"
@@ -46,6 +46,7 @@
 #include "smart_sleep.h"
 #endif
 #include "blewifi_wifi_FSM.h"
+#include "app_configuration.h"
 
 #define APP_CTRL_RESET_DELAY    (3000)  // ms
 
@@ -59,6 +60,7 @@ EventGroupHandle_t g_tAppCtrlEventGroup;
 
 uint8_t g_u8AppCtrlSysMode;
 uint8_t g_u8AppCtrlSysStatus;
+uint8_t g_ubAppCtrlPowerSaving;
 
 
 extern blewifi_ota_t *gTheOta;
@@ -78,6 +80,7 @@ static void App_Ctrl_TaskEvtHandler_WifiInitComplete(uint32_t u32EvtType, void *
 static void App_Ctrl_TaskEvtHandler_WifiScanDone(uint32_t u32EvtType, void *pData, uint32_t u32Len);
 static void App_Ctrl_TaskEvtHandler_WifiConnection(uint32_t u32EvtType, void *pData, uint32_t u32Len);
 static void App_Ctrl_TaskEvtHandler_WifiDisconnection(uint32_t u32EvtType, void *pData, uint32_t u32Len);
+static void App_Ctrl_TaskEvtHandler_WifiStopComplete(uint32_t u32EvtType, void *pData, uint32_t u32Len);
 
 static void App_Ctrl_TaskEvtHandler_OtherOtaOn(uint32_t u32EvtType, void *pData, uint32_t u32Len);
 static void App_Ctrl_TaskEvtHandler_OtherOtaOff(uint32_t u32EvtType, void *pData, uint32_t u32Len);
@@ -96,6 +99,9 @@ static void App_Ctrl_TaskEvtHandler_ButtonReleaseTimeOut(uint32_t u32EvtType, vo
 static void App_Ctrl_TaskEvtHandler_PsSmartStateChange(uint32_t u32EvtType, void *pData, uint32_t u32Len);
 static void App_Ctrl_TaskEvtHandler_PsSmartDebounceTimeOut(uint32_t u32EvtType, void *pData, uint32_t u32Len);
 #endif
+static void App_Ctrl_TaskEvtHandler_CloudConnection(uint32_t u32EvtType, void *pData, uint32_t u32Len);
+static void App_Ctrl_TaskEvtHandler_CloudDisconnection(uint32_t u32EvtType, void *pData, uint32_t u32Len);
+
 static App_Ctrl_EvtHandlerTbl_t g_tAppCtrlEvtHandlerTbl[] =
 {
     {APP_CTRL_MSG_BLE_INIT_COMPLETE,                App_Ctrl_TaskEvtHandler_BleInitComplete},
@@ -109,6 +115,7 @@ static App_Ctrl_EvtHandlerTbl_t g_tAppCtrlEvtHandlerTbl[] =
     {APP_CTRL_MSG_WIFI_SCAN_DONE,                   App_Ctrl_TaskEvtHandler_WifiScanDone},
     {APP_CTRL_MSG_WIFI_CONNECTION,                  App_Ctrl_TaskEvtHandler_WifiConnection},
     {APP_CTRL_MSG_WIFI_DISCONNECTION,               App_Ctrl_TaskEvtHandler_WifiDisconnection},
+    {APP_CTRL_MSG_WIFI_STOP_COMPLETE,               App_Ctrl_TaskEvtHandler_WifiStopComplete},
 
     {APP_CTRL_MSG_OTHER_OTA_ON,                     App_Ctrl_TaskEvtHandler_OtherOtaOn},
     {APP_CTRL_MSG_OTHER_OTA_OFF,                    App_Ctrl_TaskEvtHandler_OtherOtaOff},
@@ -128,6 +135,9 @@ static App_Ctrl_EvtHandlerTbl_t g_tAppCtrlEvtHandlerTbl[] =
     {APP_CTRL_MSG_PS_SMART_STATE_CHANGE,            App_Ctrl_TaskEvtHandler_PsSmartStateChange},
     {APP_CTRL_MSG_PS_SMART_DEBOUNCE_TIMEOUT,        App_Ctrl_TaskEvtHandler_PsSmartDebounceTimeOut},
 #endif
+
+    {APP_CTRL_MSG_CLOUD_CONNECTION,                 App_Ctrl_TaskEvtHandler_CloudConnection},
+    {APP_CTRL_MSG_CLOUD_DISCONNECTION,              App_Ctrl_TaskEvtHandler_CloudDisconnection},
 
     {0xFFFFFFFF,                                    NULL}
 };
@@ -158,23 +168,11 @@ void App_Ctrl_SysStatusChange(void)
         if (MW_FIM_SYS_MODE_USER == ubSysMode)
         {
 #if (APP_CTRL_WAKEUP_IO_EN == 1)
-            App_Ps_Smart_Init(BLEWIFI_APP_CTRL_WAKEUP_IO_PORT, ubSysMode, BLEWIFI_COM_POWER_SAVE_EN);
+            App_Ps_Smart_Init(BLEWIFI_APP_CTRL_WAKEUP_IO_PORT, ubSysMode, g_ubAppCtrlPowerSaving);
 #else
-            ps_smart_sleep(BLEWIFI_COM_POWER_SAVE_EN);
+            ps_smart_sleep(g_ubAppCtrlPowerSaving);
 #endif
         }
-
-//        // start the sys timer
-//        osTimerStop(g_tAppCtrlSysTimer);
-//        osTimerStart(g_tAppCtrlSysTimer, APP_COM_SYS_TIME_NORMAL);
-    }
-    // change from normal to ble off
-    else if (g_u8AppCtrlSysStatus == APP_CTRL_SYS_NORMAL)
-    {
-        g_u8AppCtrlSysStatus = APP_CTRL_SYS_BLE_OFF;
-
-//        // change the advertising time
-//        BleWifi_Ble_AdvertisingTimeChange(BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_PS_MIN, BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_PS_MAX);
     }
 }
 
@@ -190,13 +188,22 @@ void App_Ctrl_SysTimeout(void const *argu)
 
 static void App_Ctrl_TaskEvtHandler_BleInitComplete(uint32_t u32EvtType, void *pData, uint32_t u32Len)
 {
-    uint32_t u32BleTimeOut = APP_BLE_ADV_TIMEOUT;
+#ifdef __BLEWIFI_TRANSPARENT__
+#else
+    App_Ctrl_Networking_config_t stCfg = {0};
+
+    stCfg.u32ExpireTime = APP_BLE_ADV_TIMEOUT;
+    stCfg.u32AdvInterval = APP_BLE_ADV_DEFAULT_INTERVAL;
+#endif
 
     printf("[ATS]BLE init complete\r\n");
 
     BleWifi_COM_EventStatusSet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_BLE_INIT_DONE , true);
 
-    App_Ctrl_MsgSend(APP_CTRL_MSG_NETWORKING_START, (uint8_t *)&u32BleTimeOut, sizeof(u32BleTimeOut));
+#ifdef __BLEWIFI_TRANSPARENT__
+#else
+    App_Ctrl_MsgSend(APP_CTRL_MSG_NETWORKING_START, (uint8_t *)&stCfg, sizeof(App_Ctrl_Networking_config_t));
+#endif
 }
 
 static void App_Ctrl_TaskEvtHandler_BleStartComplete(uint32_t u32EvtType, void *pData, uint32_t u32Len)
@@ -327,6 +334,11 @@ static void App_Ctrl_TaskEvtHandler_WifiDisconnection(uint32_t u32EvtType, void 
     BleWifi_Ble_SendResponse(BLEWIFI_RSP_DISCONNECT, BLEWIFI_WIFI_DISCONNECTED_DONE);
 }
 
+static void App_Ctrl_TaskEvtHandler_WifiStopComplete(uint32_t u32EvtType, void *pData, uint32_t u32Len)
+{
+    printf("Wifi StopComplete\r\n");
+}
+
 static void App_Ctrl_TaskEvtHandler_OtherOtaOn(uint32_t u32EvtType, void *pData, uint32_t u32Len)
 {
     BLEWIFI_INFO("BLEWIFI: MSG APP_CTRL_MSG_OTHER_OTA_ON \r\n");
@@ -357,7 +369,7 @@ static void App_Ctrl_TaskEvtHandler_OtherSysTimer(uint32_t u32EvtType, void *pDa
     App_Ctrl_SysStatusChange();
 }
 
-void App_Ctrl_NetworkingStart(uint32_t u32ExpireTime)
+void App_Ctrl_NetworkingStart( uint32_t u32ExpireTime , uint32_t u32AdvInterval)
 {
     if (false == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_NETWORK))
     {
@@ -365,7 +377,7 @@ void App_Ctrl_NetworkingStart(uint32_t u32ExpireTime)
 
         BleWifi_COM_EventStatusSet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_NETWORK , true);
 
-        BleWifi_Ble_Start(100); //100 ms
+        BleWifi_Ble_Start(u32AdvInterval);
 
         osTimerStop(g_tAppCtrlNetworkTimerId);
         if ( u32ExpireTime > 0 )
@@ -403,10 +415,11 @@ void App_Ctrl_NetworkingTimeout(void const *argu)
 
 static void App_Ctrl_TaskEvtHandler_NetworkingStart(uint32_t u32EvtType, void *pData, uint32_t u32Len)
 {
-    uint32_t *pu32ExpireTime;
+    App_Ctrl_Networking_config_t *pstCfg;
 
-    pu32ExpireTime = (uint32_t *)pData;
-    App_Ctrl_NetworkingStart(*pu32ExpireTime);
+    pstCfg = (App_Ctrl_Networking_config_t *)pData;
+
+    App_Ctrl_NetworkingStart(pstCfg->u32ExpireTime , pstCfg->u32AdvInterval);
 }
 
 static void App_Ctrl_TaskEvtHandler_NetworkingStop(uint32_t u32EvtType, void *pData, uint32_t u32Len)
@@ -502,15 +515,31 @@ static void App_Ctrl_TaskEvtHandler_PsSmartDebounceTimeOut(uint32_t u32EvtType, 
     {
         /* Power saving settings */
         BLEWIFI_INFO("Ps_Smart_Off_callback, Sleep !!!!!!\r\n");
-        ps_smart_sleep(BLEWIFI_COM_POWER_SAVE_EN);
+        ps_smart_sleep(g_ubAppCtrlPowerSaving);
     }
     App_Ps_Smart_Pin_Config(APP_CTRL_WAKEUP_IO_PORT, u32PinLevel);
 }
 #endif
 
-#ifdef __BLEWIFI_TRANSPARENT__
-int App_Ctrl_BleCastWithExpire(uint8_t u8BleCastEnable, uint32_t u32ExpireTime)
+static void App_Ctrl_TaskEvtHandler_CloudConnection(uint32_t u32EvtType, void *pData, uint32_t u32Len)
 {
+    printf("[ATS]Cloud connection\r\n");
+
+    BleWifi_COM_EventStatusSet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_CLOUD_COONNECTED , true);
+}
+
+static void App_Ctrl_TaskEvtHandler_CloudDisconnection(uint32_t u32EvtType, void *pData, uint32_t u32Len)
+{
+    printf("[ATS]Cloud disconnection\r\n");
+
+    BleWifi_COM_EventStatusSet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_CLOUD_COONNECTED , false);
+}
+
+#ifdef __BLEWIFI_TRANSPARENT__
+int App_Ctrl_BleCastWithExpire(uint8_t u8BleCastEnable, uint32_t u32ExpireTime , uint32_t u32AdvInterval)
+{
+    App_Ctrl_Networking_config_t stCfg = {0};
+
     if ((u8BleCastEnable != 0) && (u8BleCastEnable != 1))
     {
         return -1;
@@ -523,7 +552,10 @@ int App_Ctrl_BleCastWithExpire(uint8_t u8BleCastEnable, uint32_t u32ExpireTime)
 
     if (u8BleCastEnable == 1)
     {
-        App_Ctrl_MsgSend(APP_CTRL_MSG_NETWORKING_START, (void *)&u32ExpireTime, sizeof(u32ExpireTime));
+        stCfg.u32ExpireTime = u32ExpireTime;
+        stCfg.u32AdvInterval = u32AdvInterval;
+
+        App_Ctrl_MsgSend(APP_CTRL_MSG_NETWORKING_START, (uint8_t *)&stCfg, sizeof(App_Ctrl_Networking_config_t));
     }
     else
     {
@@ -694,6 +726,8 @@ void App_Ctrl_Init(void)
 
     /* the init state of SYS is init */
     g_u8AppCtrlSysStatus = APP_CTRL_SYS_INIT;
+    g_ubAppCtrlPowerSaving = BLEWIFI_COM_POWER_SAVE_EN;
+
     // start the sys timer
     osTimerStop(g_tAppCtrlSysTimer);
     osTimerStart(g_tAppCtrlSysTimer, APP_COM_SYS_TIME_INIT);

@@ -32,11 +32,7 @@
 #include "iot_configuration.h"
 #include "iot_ota_http.h"
 #include "at_cmd_task_patch.h"
-#ifdef __BLEWIFI_TRANSPARENT__
-#include "hal_pin_config_project_transparent.h"
-#else
 #include "hal_pin_config_project.h"
-#endif
 #include "hal_dbg_uart.h"
 #include "hal_uart.h"
 
@@ -49,6 +45,11 @@ void AppInit(void)
     {
         // if fail, get the default value
         memcpy(&tSysMode, &g_tMwFimDefaultSysMode, MW_FIM_SYS_MODE_SIZE);
+    }
+
+    if (tSysMode.ubSysMode == MW_FIM_SYS_MODE_MP)
+    {
+        set_echo_on(false);
     }
 
     if ((tSysMode.ubSysMode == MW_FIM_SYS_MODE_MP) && (HAL_PIN_0_1_UART_MODE == IO01_UART_MODE_DBG))

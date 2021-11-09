@@ -42,12 +42,6 @@ extern "C" {
  *************************************************************************
  */
 
-typedef osStatus (*T_osMessagePutFrontFp) (osMessageQId queue_id, uint32_t info, uint32_t millisec);
-extern T_osMessagePutFrontFp osMessagePutFront;
-
-typedef osEvent (*T_osMessagePeekFp) (osMessageQId queue_id, uint32_t millisec);
-extern T_osMessagePeekFp osMessagePeek;
-
 
 /*
  *************************************************************************
@@ -62,7 +56,8 @@ extern T_osMessagePeekFp osMessagePeek;
  *************************************************************************
  */
 
-void osPatchInit(void);
+osStatus osMessagePutFront (osMessageQId queue_id, uint32_t info, uint32_t millisec);
+osEvent osMessagePeek (osMessageQId queue_id, uint32_t millisec);
 
 
 #ifdef __cplusplus

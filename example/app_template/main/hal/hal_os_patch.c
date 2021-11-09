@@ -27,9 +27,6 @@
 typedef int (*T_inHandlerModeFp)(void);
 extern RET_DATA T_inHandlerModeFp inHandlerMode;
 
-RET_DATA T_osMessagePutFp osMessagePutFront;
-RET_DATA T_osMessageGetFp osMessagePeek;
-
 /************************  Message Queue Management Functions  *****************/
 
 #if (defined (osFeature_MessageQ)  &&  (osFeature_MessageQ != 0)) /* Use Message Queues */
@@ -42,7 +39,7 @@ RET_DATA T_osMessageGetFp osMessagePeek;
 * @retval status code that indicates the execution status of the function.
 * @note   MUST REMAIN UNCHANGED: \b osMessagePut shall be consistent in every CMSIS-RTOS.
 */
-osStatus osMessagePutFront_impl (osMessageQId queue_id, uint32_t info, uint32_t millisec)
+osStatus osMessagePutFront (osMessageQId queue_id, uint32_t info, uint32_t millisec)
 {
     portBASE_TYPE taskWoken = pdFALSE;
     TickType_t ticks;
@@ -79,7 +76,7 @@ osStatus osMessagePutFront_impl (osMessageQId queue_id, uint32_t info, uint32_t 
 * @retval event information that includes status code.
 * @note   MUST REMAIN UNCHANGED: \b osMessageGet shall be consistent in every CMSIS-RTOS.
 */
-osEvent osMessagePeek_impl (osMessageQId queue_id, uint32_t millisec)
+osEvent osMessagePeek (osMessageQId queue_id, uint32_t millisec)
 {
     TickType_t ticks;
     osEvent event;
@@ -136,11 +133,3 @@ osEvent osMessagePeek_impl (osMessageQId queue_id, uint32_t millisec)
 #endif     /* Use Message Queues */
 
 /************************  SW patch ********************************************/
-
-void osPatchInit(void)
-{
-#if (defined (osFeature_MessageQ)  &&  (osFeature_MessageQ != 0)) /* Use Message Queues */
-    osMessagePutFront = osMessagePutFront_impl;
-    osMessagePeek = osMessagePeek_impl;
-#endif     /* Use Message Queues */
-}

@@ -33,8 +33,8 @@ typedef enum blewifi_ble_fsm_type
     BW_BLE_FSM_DISCONNECT                  = 0x5,
     BW_BLE_FSM_CHANGE_ADVERTISING_DATA     = 0x6,
     BW_BLE_FSM_CHANGE_SCAN_DATA            = 0x7,
-    BW_BLE_FSM_ACTIVE_END                  = 0x8,  //end event start
-
+    BW_BLE_FSM_BLE_STOP                    = 0x8,
+    BW_BLE_FSM_ACTIVE_END                  = 0x9,  //end event start
 
     BW_BLE_FSM_CFM_START                   = 0x40, //cfm start
     BW_BLE_FSM_INIT_COMPLETE               = 0x41,
@@ -42,7 +42,10 @@ typedef enum blewifi_ble_fsm_type
     BW_BLE_FSM_ADVERTISING_EXIT_CFM        = 0x43,
     BW_BLE_FSM_ADVERTISING_TIME_CHANGE_CFM = 0x44,
     BW_BLE_FSM_DISCONNECT_CFM              = 0x45,
-    BW_BLE_FSM_CFM_END                     = 0x46, //cfm end
+    //reserve                              = 0x46,
+    //reserve                              = 0x47,
+    //reserve                              = 0x48,
+    BW_BLE_FSM_CFM_END                     = 0x49, //cfm end
 
     BW_BLE_FSM_CONNECTION_SUCCESS          = 0x80,
     BW_BLE_FSM_CONNECTION_FAIL             = 0x81,
@@ -112,6 +115,7 @@ int32_t BleWifi_Ble_FSM(uint32_t u32EvtType, void *data, int len);
 //push the Ble command to cmdq and decide whether execute next cmd
 int32_t BleWifi_Ble_PushToFSMCmdQ(uint32_t u32EventId , uint8_t *pu8Data, uint32_t u32Length , T_BleWifi_Ble_App_Ctrl_CB_Fp fpCB);
 int32_t BleWifi_Ble_Queue_Push(osMessageQId tBwBleCmdQueueId , uint32_t u32EventId , uint8_t *pu8Data, uint32_t u32Length , T_BleWifi_Ble_App_Ctrl_CB_Fp fpCB , uint32_t u32IsFront);
+int32_t BwBleFlushCMD(osMessageQId tBwBleCmdQueueId);
 
 #endif /* _BLEWIFI_BLE_FSM_ */
 

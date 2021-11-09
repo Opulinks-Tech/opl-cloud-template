@@ -10,11 +10,12 @@
 ******************************************************************************/
 
 #include "blewifi_ble_api.h"
-#include "blewifi_server_app.h"
-#include "blewifi_data.h"
+#include "blewifi_ble_server_app.h"
+#include "blewifi_ble_data.h"
 #include "sys_common_api.h"
 #include "blewifi_ble_FSM.h"
 #include "blewifi_configuration.h"
+#include "app_configuration.h"
 #include "cmsis_os.h"
 #include "app_ctrl.h"
 #include "blewifi_handle.h"
@@ -53,10 +54,12 @@
 static uint8_t g_u8BwBleMode = BLEWIFI_BLE_NORMAL_MODE; // BLEWIFI_BLE_NORMAL_MODE , BLEWIFI_BLE_SMART_SLEEP_MODE
 
 osMessageQId g_tBleCMDQ_Id;
+osSemaphoreId g_tBleInternalSemaphoreId;
 
 uint8_t BleWifi_Ble_Init(void)
 {
     osMessageQDef_t stBleCMDQ = {0};
+    osSemaphoreDef_t tSemaphoreDef;
     uint16_t u16BleInterval = 0;
 
     u16BleInterval = BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_PS_MIN;
@@ -75,7 +78,17 @@ uint8_t BleWifi_Ble_Init(void)
         return 0;
     }
 
+    // create the semaphore . If need access g_tBleCMDQ_Id , it must to lock.
+    tSemaphoreDef.dummy = 0;                            // reserved, it is no used
+    g_tBleInternalSemaphoreId = osSemaphoreCreate(&tSemaphoreDef, 1);
+    if (g_tBleInternalSemaphoreId == NULL)
+    {
+        printf("BLE: create the semaphore fail \r\n");
+    }
+
     BleWifi_Ble_FSM_Init();
+
+    osSemaphoreWait(g_tBleInternalSemaphoreId, osWaitForever);
 
     /* BLE Init Step 1: Do BLE initialization first */
     BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_INITIALIZING , NULL , 0 , NULL);
@@ -89,11 +102,16 @@ uint8_t BleWifi_Ble_Init(void)
     {
         BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_ADVERTISING_TIME_CHANGE , (uint8_t *)&u16BleInterval , sizeof(u16BleInterval) , BleWifi_Ble_Init_Done_CB);
     }
+
+    osSemaphoreRelease(g_tBleInternalSemaphoreId);
+
     return 0;
 }
 uint8_t BleWifi_Ble_Start(uint16_t u16Interval)
 {
     uint16_t u16BleInterval = 0;
+
+    osSemaphoreWait(g_tBleInternalSemaphoreId, osWaitForever);
 
     if((u16Interval >= 0x20) && (u16Interval <= 0x4000))
     {
@@ -114,11 +132,18 @@ uint8_t BleWifi_Ble_Start(uint16_t u16Interval)
     {
         BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_ADVERTISING_TIME_CHANGE , (uint8_t *)&u16BleInterval , sizeof(u16BleInterval) , BleWifi_Ble_Start_Cfm_CB);
     }
+
+    osSemaphoreRelease(g_tBleInternalSemaphoreId);
+
     return 0;
 }
 uint8_t BleWifi_Ble_Stop(void)
 {
     uint16_t u16BleInterval = 0;
+
+    osSemaphoreWait(g_tBleInternalSemaphoreId, osWaitForever);
+
+    BwBleFlushCMD(g_tBleCMDQ_Id);
 
     if(g_u8BwBleMode == BLEWIFI_BLE_NORMAL_MODE)
     {
@@ -130,7 +155,11 @@ uint8_t BleWifi_Ble_Stop(void)
         u16BleInterval = BLEWIFI_BLE_ADVERTISEMENT_INTERVAL_PS_MIN ;
         BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_ADVERTISING_TIME_CHANGE , (uint8_t *)&u16BleInterval , sizeof(u16BleInterval) , NULL);
     }
-    BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_DISCONNECT , NULL , 0 , BleWifi_Ble_Stop_Cfm_CB);
+    BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_DISCONNECT , NULL , 0 , NULL);
+
+    BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_BLE_STOP , NULL , 0 , BleWifi_Ble_Stop_Cfm_CB);
+
+    osSemaphoreRelease(g_tBleInternalSemaphoreId);
 
     return 0;
 }
@@ -138,6 +167,8 @@ uint8_t BleWifi_Ble_Stop(void)
 uint8_t	BleWifi_Ble_AdvertisingIntervalChange(uint16_t u16Interval)
 {
     uint16_t u16BleInterval = 0;
+
+    osSemaphoreWait(g_tBleInternalSemaphoreId, osWaitForever);
 
     if((u16Interval >= 0x20) && (u16Interval <= 0x4000))
     {
@@ -155,19 +186,29 @@ uint8_t	BleWifi_Ble_AdvertisingIntervalChange(uint16_t u16Interval)
 
     BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_ADVERTISING_TIME_CHANGE , (uint8_t *)&u16BleInterval , sizeof(u16BleInterval) , BleWifi_Ble_Start_Cfm_CB);
 
+    osSemaphoreRelease(g_tBleInternalSemaphoreId);
+
     return 0;
 }
 
 uint8_t	BleWifi_Ble_AdvertisingDataChange(uint8_t *pu8Data, uint32_t u32DataLen)
 {
+    osSemaphoreWait(g_tBleInternalSemaphoreId, osWaitForever);
+
     BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_CHANGE_ADVERTISING_DATA , pu8Data , u32DataLen , NULL);
+
+    osSemaphoreRelease(g_tBleInternalSemaphoreId);
 
     return 0;
 }
 
 uint8_t BleWifi_Ble_ScanDataChange(uint8_t *pu8Data, uint32_t u32DataLen)
 {
+    osSemaphoreWait(g_tBleInternalSemaphoreId, osWaitForever);
+
     BleWifi_Ble_PushToFSMCmdQ(BW_BLE_FSM_CHANGE_SCAN_DATA , pu8Data , u32DataLen , NULL);
+
+    osSemaphoreRelease(g_tBleInternalSemaphoreId);
 
     return 0;
 }

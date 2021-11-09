@@ -14,19 +14,20 @@
 #include "ble_smp_if.h"
 #include "ble_gap_if.h"
 #include "ble_gatt_if.h"
-#include "blewifi_server_app_gatt.h"
+#include "blewifi_ble_server_app_gatt.h"
 
 #include "blewifi_ble_api.h"
 #include "blewifi_ble_FSM.h"
-#include "blewifi_server_app.h"
+#include "blewifi_ble_server_app.h"
 #include "blewifi_common.h"
 #include "app_ctrl.h"
 #include "blewifi_wifi_api.h"
 #include "mw_ota_def.h"
 #include "mw_ota.h"
 #include "hal_os_patch.h"
-#include "blewifi_data.h"
+#include "blewifi_ble_data.h"
 #include "blewifi_handle.h"
+#include "hal_system.h"
 
 extern BLE_APP_DATA_T gTheBle;
 static BLE_ADV_TIME_T gTheBleAdvTime;
@@ -43,6 +44,7 @@ static int32_t BleWifi_Ble_FSM_MsgHandler_ChangeAdvertisingTime(uint32_t u32EvtT
 static int32_t BleWifi_Ble_FSM_MsgHandler_Disconnection(uint32_t u32EvtType, void *data, int len);
 static int32_t BleWifi_Ble_FSM_MsgHandler_ChangeADVData(uint32_t u32EvtType, void *data, int len);
 static int32_t BleWifi_Ble_FSM_MsgHandler_ChangeScanData(uint32_t u32EvtType, void *data, int len);
+static int32_t BleWifi_Ble_FSM_MsgHandler_BleStop(uint32_t u32EvtType, void *data, int len);
 
 static int32_t BleWifi_Ble_FSM_MsgHandler_InitComplete_Cfm(uint32_t u32EvtType, void *data, int len);
 static int32_t BleWifi_Ble_FSM_MsgHandler_EnterAdvertising_Cfm(uint32_t u32EvtType, void *data, int len);
@@ -71,6 +73,7 @@ T_BleWifi_Ble_FSM_MsgHandlerTbl gstInitEventTbl[] =
     {BW_BLE_FSM_ADVERTISING_TIME_CHANGE,       BleWifi_Ble_FSM_MsgHandler_ChangeAdvertisingTime},
     {BW_BLE_FSM_CHANGE_ADVERTISING_DATA,       BleWifi_Ble_FSM_MsgHandler_ChangeADVData},
     {BW_BLE_FSM_CHANGE_SCAN_DATA,              BleWifi_Ble_FSM_MsgHandler_ChangeScanData},
+    {BW_BLE_FSM_BLE_STOP,                      BleWifi_Ble_FSM_MsgHandler_BleStop},
 
     {BW_BLE_FSM_ADVERTISING_TIME_CHANGE_CFM,   BleWifi_Ble_FSM_MsgHandler_ChangeAdvertisingTime_Cfm},
     {BW_BLE_FSM_INIT_COMPLETE,                 BleWifi_Ble_FSM_MsgHandler_InitComplete_Cfm},
@@ -86,6 +89,7 @@ T_BleWifi_Ble_FSM_MsgHandlerTbl gstIdleEventTbl[] =
     {BW_BLE_FSM_ADVERTISING_TIME_CHANGE,       BleWifi_Ble_FSM_MsgHandler_ChangeAdvertisingTime},
     {BW_BLE_FSM_CHANGE_ADVERTISING_DATA,       BleWifi_Ble_FSM_MsgHandler_ChangeADVData},
     {BW_BLE_FSM_CHANGE_SCAN_DATA,              BleWifi_Ble_FSM_MsgHandler_ChangeScanData},
+    {BW_BLE_FSM_BLE_STOP,                      BleWifi_Ble_FSM_MsgHandler_BleStop},
 
     {BW_BLE_FSM_ADVERTISING_START_CFM,         BleWifi_Ble_FSM_MsgHandler_EnterAdvertising_Cfm},
     {BW_BLE_FSM_ADVERTISING_TIME_CHANGE_CFM,   BleWifi_Ble_FSM_MsgHandler_ChangeAdvertisingTime_Cfm},
@@ -102,6 +106,7 @@ T_BleWifi_Ble_FSM_MsgHandlerTbl gstAdvertisingEventTbl[] =
     {BW_BLE_FSM_ADVERTISING_TIME_CHANGE,       BleWifi_Ble_FSM_MsgHandler_ChangeAdvertisingTime},
     {BW_BLE_FSM_CHANGE_ADVERTISING_DATA,       BleWifi_Ble_FSM_MsgHandler_ChangeADVData},
     {BW_BLE_FSM_CHANGE_SCAN_DATA,              BleWifi_Ble_FSM_MsgHandler_ChangeScanData},
+    {BW_BLE_FSM_BLE_STOP,                      BleWifi_Ble_FSM_MsgHandler_BleStop},
 
     {BW_BLE_FSM_ADVERTISING_EXIT_CFM,          BleWifi_Ble_FSM_MsgHandler_ExitAdvertising_Cfm},
     {BW_BLE_FSM_CONNECTION_SUCCESS,            BleWifi_Ble_FSM_MsgHandler_Connection_Success},
@@ -144,6 +149,100 @@ static T_BleWifi_Ble_FSM_MsgHandlerTbl *g_pstBleFSMStateTbl[] =
     {gstConnectedEventTbl}
 };
 
+int32_t _BwBleClearQueue(osMessageQId tBwBleCmdQueueId)
+{
+    osEvent rxEvent;
+
+    while(1)
+    {
+        rxEvent = osMessageGet(tBwBleCmdQueueId , 0); // pop from queue
+        if (rxEvent.status == osEventMessage)
+        {
+            /*
+            // for debug
+            BleWifi_BLE_FSM_CmdQ_t *pstTmpCmd = NULL;
+            pstTmpCmd = (BleWifi_BLE_FSM_CmdQ_t *)rxEvent.value.p;
+            printf("u32EventId = 0x%x\r\n",pstTmpCmd->u32EventId);
+            printf("u32Length = %u\r\n",pstTmpCmd->u32Length);
+            printf("fpCtrlAppCB = 0x%x\r\n",pstTmpCmd->fpCtrlAppCB);
+            for(int i = 0 ; i < pstTmpCmd->u32Length ; i++)
+            {
+                printf("u8aData[%u] = 0x%x\r\n", i ,pstTmpCmd->u8aData[i]);
+            }
+            */
+
+            free(rxEvent.value.p);  //free the data of queue
+        }
+        else
+        {
+            break;
+        }
+    }
+    return 0;
+}
+
+int32_t BwBleFlushCMD(osMessageQId tBwBleCmdQueueId)
+{
+    osEvent rxEvent;
+    BleWifi_BLE_FSM_CmdQ_t *pstPeekCmd = NULL;
+    BleWifi_BLE_FSM_CmdQ_t *pstTmpCmd = NULL;
+
+    if(g_u8BleCMDWaitingFlag == BLEWIFI_BLE_EXEC_CMD_WAITING)    //keep executing cmd.
+    {
+        rxEvent = osMessagePeek(tBwBleCmdQueueId , 0);
+
+        if(rxEvent.status == osEventMessage) //Queue has least one CMD
+        {
+            pstPeekCmd = (BleWifi_BLE_FSM_CmdQ_t *)rxEvent.value.p;
+            if(pstPeekCmd == NULL)
+            {
+                printf("Error BwBleFlushCMD cmd is null!\r\n");
+                goto done;
+            }
+            else
+            {
+                /* Mem allocate */
+                pstTmpCmd = malloc(sizeof(BleWifi_BLE_FSM_CmdQ_t) + pstPeekCmd->u32Length);
+                if (pstTmpCmd == NULL)
+                {
+                    printf("pstTmpCmd allocate fail\r\n");
+                    goto done;
+                }
+                //copy pstPeekCmd to  pstTmpCmd , because pstPeekCmd will free
+                pstTmpCmd->u32EventId = pstPeekCmd->u32EventId;
+                pstTmpCmd->u32Length = pstPeekCmd->u32Length;
+                pstTmpCmd->fpCtrlAppCB = pstPeekCmd->fpCtrlAppCB;
+                if (pstTmpCmd->u32Length > 0)
+                {
+                    memcpy(pstTmpCmd->u8aData, pstPeekCmd->u8aData, pstPeekCmd->u32Length);
+                }
+
+                // clear queue
+                _BwBleClearQueue(tBwBleCmdQueueId);
+
+                //restore the waiting cmd into queue
+                BleWifi_Ble_PushToFSMCmdQ(pstTmpCmd->u32EventId , pstTmpCmd->u8aData , pstTmpCmd->u32Length , pstTmpCmd->fpCtrlAppCB);
+
+                //free the temp cmd
+                free(pstTmpCmd);
+            }
+        }
+        else // error case , if g_u8BleCMDWaitingFlag is waiting
+        {
+            printf("Error BwBleFlushCMD no cmd!\r\n");
+            goto done;
+        }
+    }
+    else
+    {
+        _BwBleClearQueue(tBwBleCmdQueueId);
+    }
+
+done:
+
+    return 0;
+}
+
 int32_t BleWifi_Ble_Queue_Push(osMessageQId tBwBleCmdQueueId , uint32_t u32EventId , uint8_t *pu8Data, uint32_t u32Length , T_BleWifi_Ble_App_Ctrl_CB_Fp fpCB , uint32_t u32IsFront)
 {
     BleWifi_BLE_FSM_CmdQ_t *pCmd = NULL;
@@ -175,7 +274,9 @@ int32_t BleWifi_Ble_Queue_Push(osMessageQId tBwBleCmdQueueId , uint32_t u32Event
     {
         if (osOK != osMessagePutFront(tBwBleCmdQueueId, (uint32_t)pCmd, 0))
         {
-            printf("BLEWIFI: Ble FSM task cmd send fail \r\n");
+            printf("BLEWIFI: Ble FSM task cmd send fail. reset system\r\n");
+            osDelay(3000);
+            Hal_Sys_SwResetAll();
             goto error;
         }
     }
@@ -184,7 +285,9 @@ int32_t BleWifi_Ble_Queue_Push(osMessageQId tBwBleCmdQueueId , uint32_t u32Event
     {
         if (osOK != osMessagePut(tBwBleCmdQueueId, (uint32_t)pCmd, 0))
         {
-            printf("BLEWIFI: Ble FSM task cmd send fail \r\n");
+            printf("BLEWIFI: Ble FSM task cmd send fail. reset system\r\n");
+            osDelay(3000);
+            Hal_Sys_SwResetAll();
             goto error;
         }
     }
@@ -229,16 +332,17 @@ static void _BwBleFsm_Remove_Pair_CMD(uint16_t u16CheckReq)
         pstQueryCmd = (BleWifi_BLE_FSM_CmdQ_t *)rxEvent.value.p;
         if((pstQueryCmd->u32EventId == u16CheckReq) && (g_u8BleCMDWaitingFlag ==BLEWIFI_BLE_EXEC_CMD_WAITING))
         {
-            memset(&rxEvent , 0 , sizeof(osEvent));
-            rxEvent = osMessageGet(g_tBleCMDQ_Id , 0); // pop from queue
-            free(rxEvent.value.p);
-
-            g_u8BleCMDWaitingFlag = BLEWIFI_BLE_EXEC_CMD_CONTINUE;
             //execution CB
             if(pstQueryCmd->fpCtrlAppCB != NULL)
             {
                 pstQueryCmd->fpCtrlAppCB();
             }
+
+            memset(&rxEvent , 0 , sizeof(osEvent));
+            rxEvent = osMessageGet(g_tBleCMDQ_Id , 0); // pop from queue
+            free(rxEvent.value.p);
+
+            g_u8BleCMDWaitingFlag = BLEWIFI_BLE_EXEC_CMD_CONTINUE;
 
             if(BleWifi_Ble_IsQueueEmpty(g_tBleCMDQ_Id) == false)  // cmdq is not empty
             {
@@ -411,6 +515,7 @@ static int32_t BleWifi_Ble_SendToPeer(void)
     uint16_t u16RemainCopySize = 0;
     uint16_t u16SendingDataSize = 0;
     LE_ERR_STATE status;
+    uint8_t u8LastDataCheckIdx = 0;
 
     u16RemainCopySize = gTheBle.curr_mtu - 3; // max mtu size
 
@@ -432,6 +537,23 @@ static int32_t BleWifi_Ble_SendToPeer(void)
         u16RemainCopySize -= u16CopySize;
         //printf("[ASH]u16RemainCopySize = %u\r\n" , u16RemainCopySize);
     }while((pstBleDataOut->u8TotalPackageCnt[pstBleDataOut->u8ReadIdx] != pstBleDataOut->u8CurrentPackageCnt[pstBleDataOut->u8ReadIdx]) && (u16RemainCopySize >= LE_GATT_DATA_OUT_BUF_BLOCK_SIZE));
+
+    if(pstBleDataOut->u8ReadIdx != pstBleDataOut->u8WriteIdx)
+    {
+        u8LastDataCheckIdx = (pstBleDataOut->u8ReadIdx+1) % LE_GATT_DATA_OUT_BUF_CNT;
+
+        if((pstBleDataOut->u8TotalPackageCnt[u8LastDataCheckIdx] == (pstBleDataOut->u8CurrentPackageCnt[u8LastDataCheckIdx]))
+        && (u16RemainCopySize >= pstBleDataOut->u8BufDataLen[u8LastDataCheckIdx])) // last package
+        {
+            pstBleDataOut->u8ReadIdx = (pstBleDataOut->u8ReadIdx+1) % LE_GATT_DATA_OUT_BUF_CNT;
+
+            u16CopySize = pstBleDataOut->u8BufDataLen[pstBleDataOut->u8ReadIdx];
+            memcpy(&u8SendingBuf[u16CopyPos] , &pstBleDataOut->buf[(pstBleDataOut->u8ReadIdx * LE_GATT_DATA_OUT_BUF_BLOCK_SIZE)] , u16CopySize);
+            u16CopyPos += u16CopySize;
+            u16SendingDataSize += u16CopySize;
+            u16RemainCopySize -= u16CopySize;
+        }
+    }
 
 #if 0
     uint8_t u8PrintPos = 0;
@@ -664,6 +786,16 @@ static int32_t BleWifi_Ble_FSM_MsgHandler_ChangeScanData(uint32_t u32EvtType, vo
     {
         return BW_BLE_CMD_FAILED;
     }
+}
+
+static int32_t BleWifi_Ble_FSM_MsgHandler_BleStop(uint32_t u32EvtType, void *data, int len)
+{
+    //special case , This cmd doesn't execute actually
+    g_u8BleCMDWaitingFlag = BLEWIFI_BLE_EXEC_CMD_WAITING;
+
+    _BwBleFsm_Remove_Pair_CMD(BW_BLE_FSM_BLE_STOP);
+
+    return BW_BLE_CMD_FINISH;
 }
 
 static int32_t BleWifi_Ble_FSM_MsgHandler_InitComplete_Cfm(uint32_t u32EvtType, void *data, int len)

@@ -23,6 +23,22 @@
 #include "iot_handle.h"
 #include "blewifi_wifi_api.h"
 #include "etharp.h"
+#include "hal_system.h"
+
+osTimerId g_iot_tx_sw_reset_timeout_timer = NULL;  // TX
+osTimerId g_iot_tx_cloud_connect_retry_timer = NULL;  // cloud reconnect retry interval timer
+
+#define CLOUD_CONNECT_RETRY_INTERVAL_TBL_NUM (6)
+uint32_t g_u32aCloudRetryIntervalTbl[CLOUD_CONNECT_RETRY_INTERVAL_TBL_NUM] =
+{
+    0,
+    30000,
+    30000,
+    60000,
+    60000,
+    600000,
+};
+uint8_t g_u8CloudRetryIntervalIdx = 0;
 
 #if (IOT_DEVICE_DATA_TX_EN == 1)
 osThreadId g_tIotDataTxTaskId;
@@ -58,6 +74,24 @@ static T_IoT_Data_EvtHandlerTbl g_tIotDataTxTaskEvtHandlerTbl[] =
     {0xFFFFFFFF,                            NULL}
 };
 
+void Iot_Data_TxTaskEvtHandler_CloudConnectRetry(void)
+{
+    if(0 == g_u32aCloudRetryIntervalTbl[g_u8CloudRetryIntervalIdx])
+    {
+        Iot_Data_TxTask_MsgSend(IOT_DATA_TX_MSG_CLOUD_CONNECTION, NULL, 0);
+    }
+    else
+    {
+        osTimerStop(g_iot_tx_cloud_connect_retry_timer);
+        osTimerStart(g_iot_tx_cloud_connect_retry_timer, g_u32aCloudRetryIntervalTbl[g_u8CloudRetryIntervalIdx]);
+    }
+    printf("cloud retry wait %u\r\n",g_u32aCloudRetryIntervalTbl[g_u8CloudRetryIntervalIdx]);
+    if(g_u8CloudRetryIntervalIdx < CLOUD_CONNECT_RETRY_INTERVAL_TBL_NUM - 1)
+    {
+        g_u8CloudRetryIntervalIdx++;
+    }
+}
+
 static void Iot_Data_TxTaskEvtHandler_CloudInit(uint32_t evt_type, void *data, int len)
 {
     //handle Cloud Init
@@ -75,6 +109,16 @@ static void Iot_Data_TxTaskEvtHandler_CloudConnection(uint32_t evt_type, void *d
 {
     //handle Cloud Connection
     printf("Cloud Connection\n");
+
+    // connect success
+    if (1)
+    {
+    }
+    // connect fail
+    else
+    {
+        Iot_Data_TxTaskEvtHandler_CloudConnectRetry();
+    }
 }
 
 static void Iot_Data_TxTaskEvtHandler_CloudKeepAlive(uint32_t evt_type, void *data, int len)
@@ -85,15 +129,15 @@ static void Iot_Data_TxTaskEvtHandler_CloudKeepAlive(uint32_t evt_type, void *da
 
 static void Iot_Data_TxTaskEvtHandler_CloudDataPost(uint32_t evt_type, void *data, int len)
 {
-    IoT_Properity_t tProperity;
+    IoT_Properity_t tProperity = {0};
     uint32_t u32Ret;
     blewifi_wifi_set_dtim_t stSetDtim = {0};
 
     // send the data to cloud
-    if (true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_WIFI_GOT_IP))
+    //1. check if cloud connection or not
+    if (true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_WIFI_GOT_IP) &&
+        true == BleWifi_COM_EventStatusGet(g_tIotDataEventGroup, IOT_DATA_EVENT_BIT_CLOUD_CONNECTED))
     {
-        //1. add check if cloud connection or not
-
         //2. check ringbuffer is empty or not, get data from ring buffer
         if (IOT_RB_DATA_OK == IoT_Ring_Buffer_CheckEmpty(&g_stIotRbData))
             return;
@@ -173,11 +217,17 @@ void Iot_Data_TxTask(void *args)
             continue;
 
         rxMsg = (xIotDataMessage_t *)rxEvent.value.p;
+
+        osTimerStop(g_iot_tx_sw_reset_timeout_timer);
+        osTimerStart(g_iot_tx_sw_reset_timeout_timer, SW_RESET_TIME);
+
         Iot_Data_TxTaskEvtHandler(rxMsg->event, rxMsg->ucaMessage, rxMsg->length);
 
         /* Release buffer */
         if (rxMsg != NULL)
             free(rxMsg);
+
+        osTimerStop(g_iot_tx_sw_reset_timeout_timer);
     }
 }
 
@@ -273,7 +323,10 @@ int8_t Iot_Recv_Data_from_Cloud(void)
         //3. Data parser
         s8Ret = Iot_Data_Parser(u8RecvBuf, ulRecvlen);
         if(s8Ret<0)
+        {
+            printf("Iot_Data_Parser failed\n");
             goto fail;
+        }
     }
 
     s8Ret = 0;
@@ -297,8 +350,8 @@ void Iot_Data_RxTask(void *args)
             if(s8Ret<0)
             {
                 printf("Recv data from Cloud fail.\n");
-                osDelay(10); // if do nothing for rx behavior, the delay must be exist.
-                            // if do something for rx behavior, the delay could be removed.
+                osDelay(2000); // if do nothing for rx behavior, the delay must be exist.
+                               // if do something for rx behavior, the delay could be removed.
             }
         }
     }
@@ -325,11 +378,24 @@ void Iot_Data_RxInit(void)
 }
 #endif  // end of #if (IOT_DEVICE_DATA_RX_EN == 1)
 
+static void Iot_data_SwReset_TimeOutCallBack(void const *argu)
+{
+    tracer_drct_printf("Iot sw reset\r\n");
+    Hal_Sys_SwResetAll();
+}
+
+static void Iot_data_cloud_connect_retry_TimeOutCallBack(void const *argu)
+{
+    Iot_Data_TxTask_MsgSend(IOT_DATA_TX_MSG_CLOUD_CONNECTION, NULL, 0);
+}
+
 #if (IOT_DEVICE_DATA_TX_EN == 1) || (IOT_DEVICE_DATA_RX_EN == 1)
 EventGroupHandle_t g_tIotDataEventGroup;
 
 void Iot_Data_Init(void)
 {
+    osTimerDef_t tTimerDef;
+
     /* Create the event group */
     if (false == BleWifi_COM_EventCreate(&g_tIotDataEventGroup))
     {
@@ -343,5 +409,21 @@ void Iot_Data_Init(void)
 #if (IOT_DEVICE_DATA_RX_EN == 1)
     Iot_Data_RxInit();
 #endif
+
+    /* create iot tx sw reset timeout timer */
+    tTimerDef.ptimer = Iot_data_SwReset_TimeOutCallBack;
+    g_iot_tx_sw_reset_timeout_timer = osTimerCreate(&tTimerDef, osTimerOnce, NULL);
+    if (g_iot_tx_sw_reset_timeout_timer == NULL)
+    {
+        BLEWIFI_ERROR("BLEWIFI: create g_iot_tx_sw_reset_timeout_timer timeout timer fail \r\n");
+    }
+
+    /* create iot re-connect cloud timeout timer */
+    tTimerDef.ptimer = Iot_data_cloud_connect_retry_TimeOutCallBack;
+    g_iot_tx_cloud_connect_retry_timer = osTimerCreate(&tTimerDef, osTimerOnce, NULL);
+    if (g_iot_tx_cloud_connect_retry_timer == NULL)
+    {
+        BLEWIFI_ERROR("BLEWIFI: create g_iot_tx_cloud_connect_retry_timer timeout timer fail \r\n");
+    }
 }
 #endif  // end of #if (IOT_DEVICE_DATA_TX_EN == 1) || (IOT_DEVICE_DATA_RX_EN == 1)

@@ -19,6 +19,8 @@ void BleWifi_Wifi_Init_Done_CB(void);
 void BleWifi_Wifi_Scan_Done_CB(void);
 void BleWifi_Wifi_Connected_CB(void);
 void BleWifi_Wifi_Disconnected_CB(uint8_t reason);
+void BleWifi_Wifi_Req_Disconnected_CB(void);
+void BleWifi_Wifi_Stop_CB(void);
 void BleWifi_Ble_Init_Done_CB(void);
 void BleWifi_Ble_Start_Cfm_CB(void);
 void BleWifi_Ble_Stop_Cfm_CB(void);

@@ -16,9 +16,9 @@
 #include "blewifi_configuration.h"
 #include "app_ctrl.h"
 #include "mw_fim_default_group11_project.h"
-#include "blewifi_data.h"
+#include "blewifi_ble_data.h"
 #ifdef __BLEWIFI_TRANSPARENT__
-#include "blewifi_server_app.h"
+#include "blewifi_ble_server_app.h"
 #endif
 #include "agent_patch.h"
 #include "mw_fim.h"
@@ -27,6 +27,7 @@
 #include "blewifi_wifi_api.h"
 #include "iot_configuration.h"
 #include "iot_ota_http.h"
+#include "mw_ota.h"
 
 //#define AT_LOG                      msg_print_uart1
 #define AT_LOG(...)
@@ -406,54 +407,29 @@ int app_at_cmd_sys_do_wifi_ota(char *buf, int len, int mode)
 #endif
 
 #ifdef __BLEWIFI_TRANSPARENT__
-int app_at_cmd_sys_ble_cast(char *buf, int len, int mode)
+int app_at_cmd_sys_version(char *buf, int len, int mode)
 {
     int iRet = 0;
-    int argc = 0;
-    char *argv[AT_MAX_CMD_ARGS] = {0};
 
-    uint8_t u8BleCaseEnable = 0;
-    uint32_t u32ExpireTime = 0;
-
-    if (!at_cmd_buf_to_argc_argv(buf, &argc, argv, AT_MAX_CMD_ARGS))
-    {
-        goto done;
-    }
+    uint16_t uwProjectId = 0;
+    uint16_t uwChipId = 0;
+    uint16_t uwFirmwareId = 0;
 
     switch (mode)
     {
-        case AT_CMD_MODE_SET:
+        case AT_CMD_MODE_READ:
         {
-            if ((argc != 2) && (argc != 3))
+            if (MW_OTA_OK == MwOta_VersionGet(&uwProjectId, &uwChipId, &uwFirmwareId))
             {
-                AT_LOG("invalid param number\r\n");
-                msg_print_uart1("+BLECAST: Invalid param number\n\n");
+                msg_print_uart1("+VER:%u,%u.%u.%03u\r\n", IOT_CLOUD_TYPE_SELECTION,
+                                                          uwProjectId,
+                                                          uwChipId,
+                                                          uwFirmwareId);
+            }
+            else
+            {
                 goto done;
             }
-
-            switch (argc)
-            {
-                case 2:
-                {
-                    u8BleCaseEnable = (uint8_t)strtoul(argv[1], NULL, 0);
-                    break;
-                }
-                case 3:
-                {
-                    u8BleCaseEnable = (uint8_t)strtoul(argv[1], NULL, 0);
-                    u32ExpireTime = (uint32_t)strtoul(argv[2], NULL, 0);
-                    break;
-                }
-                default:
-                    break;
-            }
-
-            if (App_Ctrl_BleCastWithExpire(u8BleCaseEnable, u32ExpireTime) < 0)
-            {
-                msg_print_uart1("+BLECAST:Invalid value\n\n");
-                goto done;
-            }
-            msg_print_uart1("+BLECAST:%d,%d\n\n", u8BleCaseEnable, u32ExpireTime);
             break;
         }
 
@@ -466,11 +442,92 @@ int app_at_cmd_sys_ble_cast(char *buf, int len, int mode)
 done:
     if (iRet)
     {
-        msg_print_uart1("OK\n");
+        msg_print_uart1("OK\r\n");
     }
     else
     {
-        msg_print_uart1("ERROR\n");
+        msg_print_uart1("ERROR\r\n");
+    }
+
+    return iRet;
+}
+
+int app_at_cmd_sys_ble_cast(char *buf, int len, int mode)
+{
+    int iRet = 0;
+    int argc = 0;
+    char *argv[AT_MAX_CMD_ARGS] = {0};
+
+    uint8_t u8BleCaseEnable = 0;
+    uint32_t u32ExpireTime = 0;
+    uint32_t u32AdvInterval = 0;
+
+    if (!at_cmd_buf_to_argc_argv(buf, &argc, argv, AT_MAX_CMD_ARGS))
+    {
+        goto done;
+    }
+
+    switch (mode)
+    {
+        case AT_CMD_MODE_SET:
+        {
+            if ((argc != 2) && (argc != 3) && (argc != 4))
+            {
+                AT_LOG("invalid param number\r\n");
+                //msg_print_uart1("+BLECAST: Invalid param number\r\n");
+                goto done;
+            }
+
+            switch (argc)
+            {
+                case 2:
+                {
+                    u8BleCaseEnable = (uint8_t)strtoul(argv[1], NULL, 0);
+                    u32ExpireTime = 0;
+                    u32AdvInterval = APP_BLE_ADV_DEFAULT_INTERVAL;
+                    break;
+                }
+                case 3:
+                {
+                    u8BleCaseEnable = (uint8_t)strtoul(argv[1], NULL, 0);
+                    u32ExpireTime = (uint32_t)strtoul(argv[2], NULL, 0);
+                    u32AdvInterval = APP_BLE_ADV_DEFAULT_INTERVAL;
+                    break;
+                }
+                case 4:
+                {
+                    u8BleCaseEnable = (uint8_t)strtoul(argv[1], NULL, 0);
+                    u32ExpireTime = (uint32_t)strtoul(argv[2], NULL, 0);
+                    u32AdvInterval = (uint32_t)strtoul(argv[3], NULL, 0);
+                    break;
+                }
+                default:
+                    break;
+            }
+
+            if (App_Ctrl_BleCastWithExpire(u8BleCaseEnable , u32ExpireTime , u32AdvInterval) < 0)
+            {
+                //msg_print_uart1("+BLECAST:Invalid value\r\n");
+                goto done;
+            }
+            //msg_print_uart1("+BLECAST:%d,%d,%d\r\n", u8BleCaseEnable , u32ExpireTime , u32AdvInterval);
+            break;
+        }
+
+        default:
+            goto done;
+    }
+
+    iRet = 1;
+
+done:
+    if (iRet)
+    {
+        msg_print_uart1("OK\r\n");
+    }
+    else
+    {
+        msg_print_uart1("ERROR\r\n");
     }
 
     return iRet;
@@ -496,7 +553,6 @@ int app_at_cmd_sys_ble_cast_param(char *buf, int len, int mode)
             if (argc != 2)
             {
                 AT_LOG("invalid param number\r\n");
-                msg_print_uart1("+BLECASTPARAM: Invalid param number\n\n");
                 goto done;
             }
 
@@ -504,12 +560,11 @@ int app_at_cmd_sys_ble_cast_param(char *buf, int len, int mode)
 
             if (App_Ctrl_BleCastParamSet(u32CastInterval) < 0)
             {
-                msg_print_uart1("+BLECASTPARAM:Invalid value\n\n");
                 goto done;
             }
-            msg_print_uart1("+BLECASTPARAM:%d\n\n", u32CastInterval);
             break;
         }
+
         default:
             goto done;
     }
@@ -519,11 +574,11 @@ int app_at_cmd_sys_ble_cast_param(char *buf, int len, int mode)
 done:
     if (iRet)
     {
-        msg_print_uart1("OK\n");
+        msg_print_uart1("OK\r\n");
     }
     else
     {
-        msg_print_uart1("ERROR\n");
+        msg_print_uart1("ERROR\r\n");
     }
 
     return iRet;
@@ -537,40 +592,38 @@ int app_at_cmd_sys_ble_sts(char *buf, int len, int mode)
     {
         case AT_CMD_MODE_READ:
         {
-            if ( true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_BLE_CONNECTED))
+            if (true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_BLE_START))
             {
-                msg_print_uart1("+BLESTS:CONNECTED\n\n");
-            }
-            else if ( true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_BLE_START))
-            {
-                msg_print_uart1("+BLESTS:START\n\n");
-            }
-            else
-            {
-                if ( true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_BLE_INIT_DONE))
+                if (true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_BLE_CONNECTED))
                 {
-                    msg_print_uart1("+BLESTS:STOP\n\n");
+                    msg_print_uart1("+BLESTS:%u\r\n", APP_CTRL_BLE_STATUS_CONNECTED);
                 }
                 else
                 {
-                    msg_print_uart1("+BLESTS:NOT_INIT\n\n");
+                    msg_print_uart1("+BLESTS:%u\r\n", APP_CTRL_BLE_STATUS_ADV);
                 }
+            }
+            else
+            {
+                msg_print_uart1("+BLESTS:%u\r\n", APP_CTRL_BLE_STATUS_IDLE);
             }
             break;
        	}
+
         default:
             goto done;
     }
 
     iRet = 1;
+
 done:
     if (iRet)
     {
-        msg_print_uart1("OK\n");
+        msg_print_uart1("OK\r\n");
     }
     else
     {
-        msg_print_uart1("ERROR\n");
+        msg_print_uart1("ERROR\r\n");
     }
 
     return iRet;
@@ -584,39 +637,157 @@ int app_at_cmd_sys_wifi_sts(char *buf, int len, int mode)
     {
         case AT_CMD_MODE_READ:
         {
-            if ( true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_WIFI_SCANNING) ) {
-                msg_print_uart1("+WIFISTS:SCANNING\n\n");
+            if (true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_WIFI_CONNECTED))
+            {
+                msg_print_uart1("+WIFISTS:%u\r\n", APP_CTRL_WIFI_STATUS_CONNECTED);
             }
-            else if ( true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_WIFI_GOT_IP)) {
-                msg_print_uart1("+WIFISTS:GOT IP\n\n");
-            }
-            else if ( true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_WIFI_CONNECTED)) {
-                msg_print_uart1("+WIFISTS:CONNECTED\n\n");
-            }
-            else if ( true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_WIFI_CONNECTING) ) {
-                msg_print_uart1("+WIFISTS:CONNECTNG\n\n");
-            }
-            else if ( true == BleWifi_COM_EventStatusGet(g_tAppCtrlEventGroup , APP_CTRL_EVENT_BIT_WIFI_INIT_DONE)) {
-                msg_print_uart1("+WIFISTS:IDLE\n\n");
-            }
-            else {
-                msg_print_uart1("+WIFISTS:INIT\n\n");
+            else
+            {
+                msg_print_uart1("+WIFISTS:%u\r\n", APP_CTRL_WIFI_STATUS_IDLE);
             }
             break;
        	}
+
         default:
             goto done;
     }
 
     iRet = 1;
+
 done:
     if (iRet)
     {
-        msg_print_uart1("OK\n");
+        msg_print_uart1("OK\r\n");
     }
     else
     {
-        msg_print_uart1("ERROR\n");
+        msg_print_uart1("ERROR\r\n");
+    }
+
+    return iRet;
+}
+
+int app_at_cmd_sys_wifi_reset(char *buf, int len, int mode)
+{
+    int iRet = 0;
+    int argc = 0;
+    char *argv[AT_MAX_CMD_ARGS] = {0};
+
+    if (!at_cmd_buf_to_argc_argv(buf, &argc, argv, AT_MAX_CMD_ARGS))
+    {
+        goto done;
+    }
+
+    switch (mode)
+    {
+        case AT_CMD_MODE_EXECUTION:
+        {
+            if (0 != BleWifi_Wifi_Reset_Req())
+            {
+                goto done;
+            }
+
+            break;
+        }
+
+        default:
+            goto done;
+    }
+
+    iRet = 1;
+
+done:
+    if (iRet)
+    {
+        msg_print_uart1("OK\r\n");
+    }
+    else
+    {
+        msg_print_uart1("ERROR\r\n");
+    }
+
+    return iRet;
+}
+
+int app_at_cmd_sys_cloud_publish(char *buf, int len, int mode)
+{
+    int iRet = 0;
+    int argc = 0;
+    char *argv[AT_MAX_CMD_ARGS] = {0};
+
+    if (!at_cmd_buf_to_argc_argv(buf, &argc, argv, AT_MAX_CMD_ARGS))
+    {
+        goto done;
+    }
+
+    switch (mode)
+    {
+        case AT_CMD_MODE_READ:
+        {
+            break;
+        }
+
+        case AT_CMD_MODE_SET:
+        {
+            break;
+        }
+
+        default:
+            goto done;
+    }
+
+    iRet = 1;
+
+done:
+    if (iRet)
+    {
+        msg_print_uart1("OK\r\n");
+    }
+    else
+    {
+        msg_print_uart1("ERROR\r\n");
+    }
+
+    return iRet;
+}
+
+int app_at_cmd_sys_cloud_sts(char *buf, int len, int mode)
+{
+    int iRet = 0;
+    int argc = 0;
+    char *argv[AT_MAX_CMD_ARGS] = {0};
+
+    if (!at_cmd_buf_to_argc_argv(buf, &argc, argv, AT_MAX_CMD_ARGS))
+    {
+        goto done;
+    }
+
+    switch (mode)
+    {
+        case AT_CMD_MODE_READ:
+        {
+            break;
+        }
+
+        case AT_CMD_MODE_SET:
+        {
+            break;
+        }
+
+        default:
+            goto done;
+    }
+
+    iRet = 1;
+
+done:
+    if (iRet)
+    {
+        msg_print_uart1("OK\r\n");
+    }
+    else
+    {
+        msg_print_uart1("ERROR\r\n");
     }
 
     return iRet;
@@ -721,10 +892,14 @@ at_command_t g_taAppAtCmd[] =
     { "at+ota",             app_at_cmd_sys_do_wifi_ota,         "Do Wifi OTA" },
 #endif
 #ifdef __BLEWIFI_TRANSPARENT__
+    { "at+ver",             app_at_cmd_sys_version,             "FW Version" },
     { "at+blecast",         app_at_cmd_sys_ble_cast,            "Ble Advertise" },
     { "at+blecastparam",    app_at_cmd_sys_ble_cast_param,      "Ble Advertise Param" },
     { "at+blests",          app_at_cmd_sys_ble_sts,             "Ble Status" },
     { "at+wifists",         app_at_cmd_sys_wifi_sts,            "WiFi Status" },
+    { "at+wifirst",         app_at_cmd_sys_wifi_reset,          "WiFi Reset" },
+    { "at+cloudpub",        app_at_cmd_sys_cloud_publish,       "Cloud publish" },
+    { "at+cloudsts",        app_at_cmd_sys_cloud_sts,           "Cloud Status" },
 #endif
     { "at+fixedapinfo",     app_at_cmd_sys_fixed_ap_info,       "fixed AP Info" },
     { NULL,                 NULL,                               NULL},

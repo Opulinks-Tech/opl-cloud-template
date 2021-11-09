@@ -36,6 +36,17 @@ void BleWifi_Wifi_Disconnected_CB(uint8_t reason)
     App_Ctrl_MsgSend(APP_CTRL_MSG_WIFI_DISCONNECTION, (void *)&reason, sizeof(reason));
 }
 
+void BleWifi_Wifi_Req_Disconnected_CB(void)
+{
+    BleWifi_Wifi_Disconnected_CB(0);
+}
+
+void BleWifi_Wifi_Stop_CB(void)
+{
+    printf("BleWifi_Wifi_Stop_CB\r\n");
+    App_Ctrl_MsgSend(APP_CTRL_MSG_WIFI_STOP_COMPLETE, NULL , 0);
+}
+
 void BleWifi_Ble_Init_Done_CB(void)
 {
     printf("BleWifi_Ble_Init_Done_CB\r\n");

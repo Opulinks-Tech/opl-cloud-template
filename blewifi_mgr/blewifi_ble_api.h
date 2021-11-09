@@ -13,6 +13,7 @@
 #define __BLEWIFI_BLE_API_H__
 
 #include <stdint.h>
+#include "cmsis_os.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +24,8 @@ typedef enum blewifi_ble_mode
     BLEWIFI_BLE_NORMAL_MODE                = 0x0,
     BLEWIFI_BLE_SMART_SLEEP_MODE           = 0x1
 } blewifi_ble_mode_e;
+
+extern osSemaphoreId g_tBleInternalSemaphoreId;
 
 uint8_t BleWifi_Ble_Init(void);
 uint8_t BleWifi_Ble_Start(uint16_t u16Interval);
