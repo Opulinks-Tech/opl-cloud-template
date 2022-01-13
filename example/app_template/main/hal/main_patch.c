@@ -128,8 +128,6 @@ void __Patch_EntryPoint(void)
 #if (SWITCH_TO_32K_RC == 1)
     // Uncomment this function when the device is without 32k XTAL.
     Sys_SwitchTo32kRC();
-#else
-    ps_32k_xtal_measure(200);
 #endif
 
     // update the pin mux
@@ -323,6 +321,11 @@ static void Main_AppInit_patch(void)
 {
     // add the application initialization from here
     printf("AppInit\n");
+
+#if (SWITCH_TO_32K_RC == 1)
+#else
+    ps_32k_xtal_measure(200);
+#endif
 
     sys_cfg_clk_set(SYS_CLK_RATE);
 
