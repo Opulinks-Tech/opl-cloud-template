@@ -748,9 +748,11 @@ void _BwWifiFsm_WifidisconnectCheck(uint8_t u8Reason)
             _BwWifiFsm_Remove_Pair_CMD(BW_WIFI_FSM_MSG_WIFI_REQ_CONNECT);
             if (g_BwWifiReqConnRetryTimes < BLEWIFI_WIFI_REQ_CONNECT_RETRY_TIMES)
             {
+                osDelay(100);
+
                 memcpy(&stWifiConnConfig , pstQueryCmd->u8aData , sizeof(stWifiConnConfig));
 //                g_BwWifiReqConnRetryTimes++;
-                printf("g_BwWifiReqConnRetryTimes = %u\r\n",g_BwWifiReqConnRetryTimes);
+//                printf("g_BwWifiReqConnRetryTimes = %u\r\n",g_BwWifiReqConnRetryTimes);
                 BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_CONNECT, (uint8_t*)&stWifiConnConfig, sizeof(wifi_conn_config_t), NULL, BLEWIFI_QUEUE_FRONT);
                 BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
             }
@@ -933,6 +935,14 @@ static int32_t BwWifiFsm_TaskEvtHandler_Scan_Req(uint32_t u32EventId, uint8_t *p
             #if 0
             if(pstQueryCmd->u32EventId == BW_WIFI_FSM_MSG_WIFI_REQ_AUTO_CONNECT_SCAN)
             {
+                // remove the cmd, if it is not executed
+                memset(&rxEvent, 0, sizeof(osEvent));
+                rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
+                if (rxEvent.status == osEventMessage)
+                {
+                    free(rxEvent.value.p);
+                }
+
                 if (0 != g_RoamingApInfoTotalCnt)
                 {
                     g_iIdxOfApInfo = 0; //initialize index for roaming connection
@@ -941,15 +951,7 @@ static int32_t BwWifiFsm_TaskEvtHandler_Scan_Req(uint32_t u32EventId, uint8_t *p
                     stScanConfig.show_hidden = 1;
                     stScanConfig.scan_type = WIFI_SCAN_TYPE_MIX;
 
-                    memset(&rxEvent, 0, sizeof(osEvent));
-                    rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
-                    if (rxEvent.status == osEventMessage)
-                    {
-                        free(rxEvent.value.p);
-                    }
                     BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_SCAN, (uint8_t *)&stScanConfig , sizeof(wifi_scan_config_t) , NULL, BLEWIFI_QUEUE_FRONT);
-
-                    return BW_WIFI_CMD_FAILED_NEXT;
                 }
                 else
                 {
@@ -960,7 +962,22 @@ static int32_t BwWifiFsm_TaskEvtHandler_Scan_Req(uint32_t u32EventId, uint8_t *p
             #endif
             if(pstQueryCmd->u32EventId == BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_SCAN)
             {
+                // remove the cmd, if it is not executed
+                memset(&rxEvent, 0, sizeof(osEvent));
+                rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
+                if (rxEvent.status == osEventMessage)
+                {
+                    free(rxEvent.value.p);
+                }
+
                 _BwWifiFsm_DoAutoConnect_Retry();
+            }
+            else
+            {
+                printf("exec scan, then done\r\n");
+
+                BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_SCAN_DONE_IND, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
+                return BW_WIFI_CMD_EXECUTING;
             }
         }
         return BW_WIFI_CMD_FAILED;
@@ -1026,6 +1043,14 @@ static int32_t BwWifiFsm_TaskEvtHandler_Connect_Req(uint32_t u32EventId, uint8_t
             #if 0
             if(pstQueryCmd->u32EventId == BW_WIFI_FSM_MSG_WIFI_REQ_AUTO_CONNECT)
             {
+                // remove the cmd, if it is not executed
+                memset(&rxEvent, 0, sizeof(osEvent));
+                rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
+                if (rxEvent.status == osEventMessage)
+                {
+                    free(rxEvent.value.p);
+                }
+
                 if (0 != g_RoamingApInfoTotalCnt)
                 {
                     g_iIdxOfApInfo = 0; //initialize index for roaming connection
@@ -1034,15 +1059,7 @@ static int32_t BwWifiFsm_TaskEvtHandler_Connect_Req(uint32_t u32EventId, uint8_t
                     stScanConfig.show_hidden = 1;
                     stScanConfig.scan_type = WIFI_SCAN_TYPE_MIX;
 
-                    memset(&rxEvent, 0, sizeof(osEvent));
-                    rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
-                    if (rxEvent.status == osEventMessage)
-                    {
-                        free(rxEvent.value.p);
-                    }
                     BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_SCAN, (uint8_t *)&stScanConfig , sizeof(wifi_scan_config_t) , NULL, BLEWIFI_QUEUE_FRONT);
-
-                    return BW_WIFI_CMD_FAILED_NEXT;
                 }
                 else
                 {
@@ -1053,7 +1070,24 @@ static int32_t BwWifiFsm_TaskEvtHandler_Connect_Req(uint32_t u32EventId, uint8_t
             #endif
             if(pstQueryCmd->u32EventId == BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_CONNECT)
             {
+                // remove the cmd, if it is not executed
+                memset(&rxEvent, 0, sizeof(osEvent));
+                rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
+                if (rxEvent.status == osEventMessage)
+                {
+                    free(rxEvent.value.p);
+                }
+
                 _BwWifiFsm_DoAutoConnect_Retry();
+            }
+            else
+            {
+                uint8_t reason = WIFI_REASON_CODE_AUTH_FAILED;
+
+                printf("exec conn, then done\r\n");
+
+                BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_DISCONNECTION_IND, &reason, sizeof(uint8_t) , NULL, BLEWIFI_QUEUE_BACK);
+                return BW_WIFI_CMD_EXECUTING;
             }
         }
         return BW_WIFI_CMD_FAILED;
@@ -1078,7 +1112,13 @@ static int32_t BwWifiFsm_TaskEvtHandler_Auto_Connect_Scan_Req(uint32_t u32EventI
 
     if (0 == u8AutoConnListNum)
     {
-        _BwWifiFsm_Remove_Pair_CMD(BW_WIFI_FSM_MSG_WIFI_REQ_AUTO_CONNECT_SCAN);
+        // remove the cmd, if it is not executed
+        memset(&rxEvent, 0, sizeof(osEvent));
+        rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
+        if (rxEvent.status == osEventMessage)
+        {
+            free(rxEvent.value.p);
+        }
 
         // do roaming
         if (0 != g_RoamingApInfoTotalCnt)
@@ -1086,20 +1126,17 @@ static int32_t BwWifiFsm_TaskEvtHandler_Auto_Connect_Scan_Req(uint32_t u32EventI
             g_iIdxOfApInfo = 0; //initialize index for roaming connection
 
             BLEWIFI_INFO("Do roaming scan \r\n");
-
-            memset(&rxEvent, 0, sizeof(osEvent));
-            rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
-            if (rxEvent.status == osEventMessage)
-            {
-                free(rxEvent.value.p);
-            }
             BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_SCAN, (uint8_t *)&stScanConfig , sizeof(wifi_scan_config_t) , NULL, BLEWIFI_QUEUE_FRONT);
-
-            return BW_WIFI_CMD_FAILED_NEXT;
         }
         else
         {
             // do nothing when u8AutoConnListNum == 0 and g_RoamingApInfoTotalCnt == 0
+        }
+
+        g_u8WifiCmdWaitingFlag = BLEWIFI_WIFI_EXEC_CMD_CONTINUE;
+        if(BleWifi_Wifi_IsQueueEmpty(g_tBwWifiFsmCmdQueueId) == false)  // cmdq is not empty
+        {
+            BleWifi_Wifi_FSM_MsgSend(BW_WIFI_FSM_MSG_WIFI_EXEC_CMD, NULL, 0, NULL, BLEWIFI_QUEUE_BACK);
         }
 
         return BW_WIFI_CMD_FINISH;
@@ -1108,22 +1145,21 @@ static int32_t BwWifiFsm_TaskEvtHandler_Auto_Connect_Scan_Req(uint32_t u32EventI
     sRet = wifi_scan_start(&stScanConfig, NULL);
     if(0 != sRet)
     {
+        // remove the cmd, if it is not executed
+        memset(&rxEvent, 0, sizeof(osEvent));
+        rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
+        if (rxEvent.status == osEventMessage)
+        {
+            free(rxEvent.value.p);
+        }
+
         // do roaming
         if (0 != g_RoamingApInfoTotalCnt)
         {
             g_iIdxOfApInfo = 0; //initialize index for roaming connection
 
             BLEWIFI_INFO("Do roaming scan \r\n");
-
-            memset(&rxEvent, 0, sizeof(osEvent));
-            rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
-            if (rxEvent.status == osEventMessage)
-            {
-                free(rxEvent.value.p);
-            }
             BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_SCAN, (uint8_t *)&stScanConfig , sizeof(wifi_scan_config_t) , NULL, BLEWIFI_QUEUE_FRONT);
-
-            return BW_WIFI_CMD_FAILED_NEXT;
         }
         else
         {
@@ -1134,6 +1170,7 @@ static int32_t BwWifiFsm_TaskEvtHandler_Auto_Connect_Scan_Req(uint32_t u32EventI
         printf("exec scan req failed\r\n");
         return BW_WIFI_CMD_FAILED;
     }
+
     return BW_WIFI_CMD_EXECUTING;
 }
 
@@ -1148,6 +1185,14 @@ static int32_t BwWifiFsm_TaskEvtHandler_Auto_Connect_Req(uint32_t u32EventId, ui
     sRet = wifi_auto_connect_start();
     if(sRet != 0)
     {
+        // remove the cmd, if it is not executed
+        memset(&rxEvent, 0, sizeof(osEvent));
+        rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
+        if (rxEvent.status == osEventMessage)
+        {
+            free(rxEvent.value.p);
+        }
+
         // do roaming
         if (0 != g_RoamingApInfoTotalCnt)
         {
@@ -1158,22 +1203,14 @@ static int32_t BwWifiFsm_TaskEvtHandler_Auto_Connect_Req(uint32_t u32EventId, ui
             stScanConfig.scan_type = WIFI_SCAN_TYPE_MIX;
 
             BLEWIFI_INFO("Do roaming scan \r\n");
-
-            memset(&rxEvent, 0, sizeof(osEvent));
-            rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
-            if (rxEvent.status == osEventMessage)
-            {
-                free(rxEvent.value.p);
-            }
             BleWifi_Wifi_FSM_CmdPush(BW_WIFI_FSM_MSG_WIFI_REQ_ROAMING_SCAN, (uint8_t *)&stScanConfig , sizeof(wifi_scan_config_t) , NULL, BLEWIFI_QUEUE_FRONT);
-
-            return BW_WIFI_CMD_FAILED_NEXT;
         }
         else
         {
             _BwWifiFsm_DoAutoConnect_Retry();
         }
 
+        printf("exec auto connect req failed\r\n");
         return BW_WIFI_CMD_FAILED;
     }
     return BW_WIFI_CMD_EXECUTING;
@@ -1184,11 +1221,19 @@ static int32_t BwWifiFsm_TaskEvtHandler_Disconnect_Req(uint32_t u32EventId, uint
     printf("BLEWIFI: Recv BLEWIFI_REQ_DISCONNECT \r\n");
 
     int sRet=0;
+    osEvent rxEvent;
 
     sRet = wifi_connection_disconnect_ap();
 
     if( 0 != sRet )
     {
+        memset(&rxEvent, 0, sizeof(osEvent));
+        rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
+        if (rxEvent.status == osEventMessage)
+        {
+            free(rxEvent.value.p);
+        }
+
         printf("exe disconn req failed\n");
         return BW_WIFI_CMD_FAILED;
     }
@@ -1262,22 +1307,9 @@ static int32_t BleWifi_Wifi_FSM_MsgHandler(T_Bw_Wifi_FsmEvtHandlerTbl tHanderTbl
     }
 
     // M3 CMD timeout or Req fail
-    if ((u8Status == BW_WIFI_CMD_M3_TIMEOUT) || (u8Status == BW_WIFI_CMD_FAILED) || (u8Status == BW_WIFI_CMD_FAILED_NEXT))
+    if ((u8Status == BW_WIFI_CMD_M3_TIMEOUT) || (u8Status == BW_WIFI_CMD_FAILED))
     {
         printf("tHanderTbl[i].u32EventId = 0x%x , BW_WIFI_CMD_FAILED\r\n" ,tHanderTbl[i].u32EventId );
-        if(u8Status == BW_WIFI_CMD_M3_TIMEOUT)
-        {
-            printf("M3 CMD timeout\r\n");
-        }
-        if (u8Status != BW_WIFI_CMD_FAILED_NEXT)
-        {
-            memset(&rxEvent, 0, sizeof(osEvent));
-            rxEvent = osMessageGet(g_tBwWifiFsmCmdQueueId, 0); // pop from queue
-            if (rxEvent.status == osEventMessage)
-            {
-                free(rxEvent.value.p);
-            }
-        }
 
         g_u8WifiCmdWaitingFlag = BLEWIFI_WIFI_EXEC_CMD_CONTINUE;
         if(BleWifi_Wifi_IsQueueEmpty(g_tBwWifiFsmCmdQueueId) == false)  // cmdq is not empty
